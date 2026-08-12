@@ -225,6 +225,18 @@ post-test-year history for a meaningful backtest, then `POST /train {"country": 
 `tests/data_quality/` validates whichever countries are currently synced and skips the rest —
 CI stays green regardless of which API keys have been supplied.
 
+**"Comparaison 2019" page** — 2019 is the only calendar year every country has a complete
+series for (France's static export ends there; the other four's synced range starts there),
+so it's the one honest apples-to-apples comparison point. The page reads all 5 countries'
+raw CSVs directly (no training required) and computes, live: total and per-capita 2019
+consumption (World Bank population estimates), the monthly seasonality profile as a %
+of each country's own annual total (so countries of very different scale overlay on one
+axis), and each country's temperature sensitivity — the slope and R² of `Consommation ~
+DJU` — shown as small-multiple scatter panels. The one finding this consistently surfaces:
+the USA is the only country where summer (Jun–Aug) outweighs winter (Dec–Feb) in the
+annual total, an air-conditioning signature the four heating-dominated European countries
+don't share.
+
 ---
 
 ## Data & Experiment Tracking
