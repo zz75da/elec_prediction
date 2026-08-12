@@ -54,9 +54,7 @@ def load_metadata(country: str = "france") -> dict:
 def load_deployment_model(country: str = "france"):
     metadata = load_metadata(country)
     best = metadata.get("best_model", "sarima")
-    if best == "holt_winters":
-        return _load_pickle("holt_winters_model.pkl", country), "holt_winters", metadata
-    return _load_pickle("sarima_model.pkl", country), "sarima", metadata
+    return _load_pickle(f"{best}_model.pkl", country), best, metadata
 
 
 def load_ols_model(country: str = "france"):

@@ -27,6 +27,18 @@ data:
       raw_dju_path: data/raw/germany/dju_mensuel.csv
       processed_path: data/processed/germany/conso_corrigee.csv
       test_year: 2023          # synced range: 2019-01 to 2024-12
+    austria:
+      label: Austria
+      raw_conso_path: data/raw/austria/consommation_mensuelle.csv  # SMARD (region=AT), no auth
+      raw_dju_path: data/raw/austria/dju_mensuel.csv
+      processed_path: data/processed/austria/conso_corrigee.csv
+      test_year: 2023          # synced range: 2015-01 to 2024-12
+    luxembourg:
+      label: Luxembourg
+      raw_conso_path: data/raw/luxembourg/consommation_mensuelle.csv  # SMARD (region=LU), no auth
+      raw_dju_path: data/raw/luxembourg/dju_mensuel.csv
+      processed_path: data/processed/luxembourg/conso_corrigee.csv
+      test_year: 2023          # synced range: 2015-01 to 2024-12
     uk:
       label: "United Kingdom"
       raw_conso_path: data/raw/uk/consommation_mensuelle.csv       # NESO historic demand data (half-hourly, aggregated), no auth
@@ -53,6 +65,27 @@ model_sarima:
   order: [0, 1, 1]           # (p, d, q) — selected in notebook after ACF/PACF + Ljung-Box diagnostics
   seasonal_order: [1, 1, 1, 12]  # (P, D, Q, s)
   log_transform: true        # fit on log(Conso_correction), exponentiate forecasts back (notebook cell 90-96)
+
+model_ml_global:
+  # Third candidate: a single LightGBM model pooling ALL countries' Conso_correction
+  # series (via Nixtla's mlforecast), rather than one ML model fit per country on
+  # ~100 rows — see train-api/services/trainer_ml.py's module docstring for why.
+  enabled: true
+  min_countries_required: 2   # below this (e.g. a fresh single-country setup), skip this candidate
+  freq: "MS"                  # data is month-start (2019-01-01, ...)
+  lags: [1, 2, 3, 6, 12]
+  date_features: ["month"]
+  static_features: ["country"]
+  lightgbm_params:
+    n_estimators: 200
+    learning_rate: 0.05
+    max_depth: 4
+    num_leaves: 15
+    min_child_samples: 5      # LightGBM's default (20) is too strict for ~300-400 pooled training rows
+    subsample: 0.8
+    colsample_bytree: 0.8
+    random_state: 42
+    verbosity: -1
 
 quality_gate:
   mape_threshold: 10.0       # % — notebook's own acceptability threshold ("MAPE < 10 = très bonne prédiction")

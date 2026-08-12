@@ -11,6 +11,10 @@
 #   - forecast_holt_winters(model, horizon) -> np.ndarray
 #   - forecast_sarima(results, horizon, log_transform, alpha) ->
 #     (pred, ci_lower, ci_upper)
+#   - forecast_ml_global(fcst, horizon, country) -> np.ndarray :
+#     modele MLForecast (LightGBM, pooling multi-pays) — meme
+#     logique que train-api/services/trainer_ml.py::forecast_country,
+#     dupliquee ici par independance des microservices
 #   - reconstruct_consumption(conso_correction_pred, dju_forecast, ols_model)
 #     -> Consommation = Conso_correction + coef_DJU * DJU
 #     (inverse de Conso_correction = Consommation - coef_DJU * DJU)
@@ -37,6 +41,11 @@ def forecast_sarima(results, horizon: int, log_transform: bool = True, alpha: fl
         upper = np.exp(upper)
 
     return np.asarray(mean), lower, upper
+
+
+def forecast_ml_global(fcst, horizon: int, country: str) -> np.ndarray:
+    preds = fcst.predict(h=horizon, ids=[country]).sort_values("ds")
+    return preds["ml_global"].to_numpy()
 
 
 def reconstruct_consumption(conso_correction_pred: np.ndarray, dju_forecast, ols_model) -> np.ndarray:

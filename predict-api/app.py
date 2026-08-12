@@ -3,8 +3,9 @@
 # ------------------------------------------------------------
 # Role : microservice FastAPI (port 5011) qui sert les previsions
 # de consommation electrique a partir du modele deploye par
-# train-api (Holt-Winters ou SARIMA, selon model_metadata.json),
-# pour un ou plusieurs pays (ARTIFACTS_PATH/<country>/...).
+# train-api (Holt-Winters, SARIMA, ou ml_global (LightGBM multi-
+# pays), selon model_metadata.json), pour un ou plusieurs pays
+# (ARTIFACTS_PATH/<country>/...).
 # Expose /predict (horizon en mois, pays optionnel), /health,
 # /metrics (Prometheus). Pattern d'architecture (chargement des
 # artefacts au demarrage, Prometheus request/latence, reload a
@@ -131,10 +132,15 @@ def predict(req: PredictRequest):
     if model_type == "holt_winters":
         pred = forecast.forecast_holt_winters(country_state["model"], req.horizon)
         lower = upper = None
-    else:
+    elif model_type == "sarima":
         pred, lower, upper = forecast.forecast_sarima(
             country_state["model"], req.horizon, log_transform=metadata.get("sarima_log_transform", True),
         )
+    elif model_type == "ml_global":
+        pred = forecast.forecast_ml_global(country_state["model"], req.horizon, country=country)
+        lower = upper = None
+    else:
+        raise HTTPException(status_code=500, detail=f"Unknown model_type '{model_type}' for country='{country}'")
 
     last_month = pd.Timestamp(metadata["last_observed_month"])
     future_months = pd.date_range(last_month, periods=req.horizon + 1, freq="M")[1:]

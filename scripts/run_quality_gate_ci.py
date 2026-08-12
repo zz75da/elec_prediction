@@ -21,7 +21,7 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "train-api"))
 
-from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima  # noqa: E402
+from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_ml, trainer_sarima  # noqa: E402
 
 
 def main():
@@ -63,7 +63,22 @@ def main():
     sarima_metrics = evaluate.evaluate_forecast(test_df["Conso_correction"].values, sarima_pred)
 
     metrics = {"holt_winters": hw_metrics, "sarima": sarima_metrics}
-    best_model = "sarima" if sarima_metrics["mape"] <= hw_metrics["mape"] else "holt_winters"
+
+    ml_cfg = params["model_ml_global"]
+    ml_fcst_full = None
+    ml_ran = False
+    if ml_cfg["enabled"]:
+        other_frames = trainer_ml.load_other_country_frames(params, seasonal_periods, exclude=country)
+        n_available = len(other_frames) + 1
+        if n_available >= ml_cfg["min_countries_required"]:
+            cutoff_years = {c: params["data"]["countries"][c]["test_year"] for c in params["data"]["countries"]}
+            pooled_bt = trainer_ml.build_pooled_frame({**other_frames, country: df}, cutoff_years=cutoff_years)
+            ml_fcst_bt = trainer_ml.fit_global_model(pooled_bt, ml_cfg)
+            ml_pred = trainer_ml.forecast_country(ml_fcst_bt, country, horizon)
+            metrics["ml_global"] = evaluate.evaluate_forecast(test_df["Conso_correction"].values, ml_pred)
+            ml_ran = True
+
+    best_model = min(metrics, key=lambda k: metrics[k]["mape"])
 
     hw_model_full = trainer_holtwinters.fit_holt_winters(
         df["Conso_correction"], seasonal_periods=seasonal_periods, trend=hw_cfg["trend"], seasonal=hw_cfg["seasonal"],
@@ -72,6 +87,9 @@ def main():
         df["Conso_correction"], order=sarima_cfg["order"],
         seasonal_order=sarima_cfg["seasonal_order"], log_transform=sarima_cfg["log_transform"],
     )
+    if ml_ran:
+        pooled_full = trainer_ml.build_pooled_frame({**other_frames, country: df}, cutoff_years=None)
+        ml_fcst_full = trainer_ml.fit_global_model(pooled_full, ml_cfg)
 
     metadata = {
         "country": country,
@@ -95,12 +113,16 @@ def main():
         },
     }
 
-    artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history, country=country)
+    artifacts.save_artifacts(
+        ols_results,
+        {"holt_winters": hw_model_full, "sarima": sarima_results_full, "ml_global": ml_fcst_full},
+        metadata, history, country=country,
+    )
 
     print(f"Country: {country}")
     print(f"Best model: {best_model}")
-    print(f"Holt-Winters MAPE: {hw_metrics['mape']}%  RMSE: {hw_metrics['rmse']}")
-    print(f"SARIMA MAPE:       {sarima_metrics['mape']}%  RMSE: {sarima_metrics['rmse']}")
+    for name, m in metrics.items():
+        print(f"{name:15s} MAPE: {m['mape']}%  RMSE: {m['rmse']}")
 
 
 if __name__ == "__main__":

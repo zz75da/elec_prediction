@@ -47,7 +47,7 @@ from prometheus_client import Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
-from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima
+from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_ml, trainer_sarima
 from utils.logger import get_logger
 
 logger = get_logger()
@@ -95,7 +95,7 @@ def _load_persisted_jobs():
 _load_persisted_jobs()
 
 
-def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str, country: str, test_year: int):
+def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str, country: str, test_year: int, ml_ran: bool):
     """Best-effort MLflow logging — never fails the training run if MLflow/DagsHub is unreachable."""
     if not os.getenv("MLFLOW_TRACKING_URI"):
         logger.info("MLFLOW_TRACKING_URI not set — skipping MLflow logging")
@@ -105,7 +105,7 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str,
 
         mlflow.set_experiment(params.get("mlflow", {}).get("experiment_name", "elec_prediction"))
         with mlflow.start_run():
-            mlflow.log_params({
+            log_params = {
                 "country": country,
                 "sarima_order": params["model_sarima"]["order"],
                 "sarima_seasonal_order": params["model_sarima"]["seasonal_order"],
@@ -113,14 +113,21 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str,
                 "hw_trend": params["model_holt_winters"]["trend"],
                 "hw_seasonal": params["model_holt_winters"]["seasonal"],
                 "test_year": test_year,
-            })
-            mlflow.log_metrics({
-                "ols_r2": stats["ols_r2"],
-                "holt_winters_mape": metrics["holt_winters"]["mape"],
-                "holt_winters_rmse": metrics["holt_winters"]["rmse"],
-                "sarima_mape": metrics["sarima"]["mape"],
-                "sarima_rmse": metrics["sarima"]["rmse"],
-            })
+            }
+            if ml_ran:
+                ml_cfg = params["model_ml_global"]
+                log_params.update({
+                    "ml_lags": ml_cfg["lags"],
+                    **{f"ml_{k}": v for k, v in ml_cfg["lightgbm_params"].items()},
+                })
+            mlflow.log_params(log_params)
+
+            log_metrics = {"ols_r2": stats["ols_r2"]}
+            for name, m in metrics.items():
+                log_metrics[f"{name}_mape"] = m["mape"]
+                log_metrics[f"{name}_rmse"] = m["rmse"]
+            mlflow.log_metrics(log_metrics)
+
             mlflow.set_tag("best_model", best_model)
             mlflow.set_tag("country", country)
         logger.info("MLflow run logged successfully")
@@ -174,17 +181,37 @@ def _run_training_pipeline(job_id: str, country: str):
 
         metrics = {"holt_winters": hw_metrics, "sarima": sarima_metrics}
 
-        # --- 5. Select best model by MAPE ---
-        best_model = "sarima" if sarima_metrics["mape"] <= hw_metrics["mape"] else "holt_winters"
+        # --- 4b. ML global backtest (third candidate) — pools every other country's full
+        # history plus this country's own pre-test_year rows, skips cleanly if too few
+        # countries have data yet (see params.yaml's model_ml_global.min_countries_required) ---
+        ml_cfg = params["model_ml_global"]
+        ml_fcst_full = None
+        ml_ran = False
+        if ml_cfg["enabled"]:
+            other_frames = trainer_ml.load_other_country_frames(params, seasonal_periods, exclude=country)
+            n_available = len(other_frames) + 1
+            if n_available < ml_cfg["min_countries_required"]:
+                logger.info(
+                    f"[job={job_id}] Skipping ml_global — only {n_available} country(ies) available, "
+                    f"need {ml_cfg['min_countries_required']}"
+                )
+            else:
+                cutoff_years = {c: params["data"]["countries"][c]["test_year"] for c in params["data"]["countries"]}
+                pooled_bt = trainer_ml.build_pooled_frame({**other_frames, country: df}, cutoff_years=cutoff_years)
+                ml_fcst_bt = trainer_ml.fit_global_model(pooled_bt, ml_cfg)
+                ml_pred = trainer_ml.forecast_country(ml_fcst_bt, country, horizon)
+                metrics["ml_global"] = evaluate.evaluate_forecast(test_df["Conso_correction"].values, ml_pred)
+                ml_ran = True
 
-        model_mape_gauge.labels(model="holt_winters", country=country).set(hw_metrics["mape"])
-        model_rmse_gauge.labels(model="holt_winters", country=country).set(hw_metrics["rmse"])
-        model_mape_gauge.labels(model="sarima", country=country).set(sarima_metrics["mape"])
-        model_rmse_gauge.labels(model="sarima", country=country).set(sarima_metrics["rmse"])
-        model_best_gauge.labels(model="holt_winters", country=country).set(1 if best_model == "holt_winters" else 0)
-        model_best_gauge.labels(model="sarima", country=country).set(1 if best_model == "sarima" else 0)
+        # --- 5. Select best model by MAPE (generic over however many candidates ran) ---
+        best_model = min(metrics, key=lambda k: metrics[k]["mape"])
 
-        # --- 6. Refit both models on the FULL series for deployment (predict-api serves this) ---
+        for name, m in metrics.items():
+            model_mape_gauge.labels(model=name, country=country).set(m["mape"])
+            model_rmse_gauge.labels(model=name, country=country).set(m["rmse"])
+            model_best_gauge.labels(model=name, country=country).set(1 if name == best_model else 0)
+
+        # --- 6. Refit candidates on the FULL series for deployment (predict-api serves this) ---
         hw_model_full = trainer_holtwinters.fit_holt_winters(
             df["Conso_correction"], seasonal_periods=seasonal_periods,
             trend=hw_cfg["trend"], seasonal=hw_cfg["seasonal"],
@@ -193,6 +220,9 @@ def _run_training_pipeline(job_id: str, country: str):
             df["Conso_correction"], order=sarima_cfg["order"],
             seasonal_order=sarima_cfg["seasonal_order"], log_transform=sarima_cfg["log_transform"],
         )
+        if ml_ran:
+            pooled_full = trainer_ml.build_pooled_frame({**other_frames, country: df}, cutoff_years=None)
+            ml_fcst_full = trainer_ml.fit_global_model(pooled_full, ml_cfg)
 
         metadata = {
             "country": country,
@@ -217,8 +247,12 @@ def _run_training_pipeline(job_id: str, country: str):
             },
         }
 
-        artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history, country=country)
-        _maybe_log_mlflow(params, stats, metrics, best_model, country, test_year)
+        artifacts.save_artifacts(
+            ols_results,
+            {"holt_winters": hw_model_full, "sarima": sarima_results_full, "ml_global": ml_fcst_full},
+            metadata, history, country=country,
+        )
+        _maybe_log_mlflow(params, stats, metrics, best_model, country, test_year, ml_ran)
         last_train_timestamp.labels(country=country).set(datetime.now(timezone.utc).timestamp())
 
         result = {

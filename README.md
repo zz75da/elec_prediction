@@ -6,13 +6,14 @@
 **Author:** [zz75da](https://github.com/zz75da) · z.zeghoud@yahoo.com
 
 MLOps platform for forecasting monthly national electricity consumption, corrected for
-temperature effects (heating degree-days) and forecast with Holt-Winters and SARIMA. Started as a
-France-only rebuild of `P9_01_notebook.ipynb` (OpenClassrooms P9) and now supports **5 countries**
-(France, USA, Germany, UK, Finland — selectable from the Streamlit UI), each trained and served
-independently. Small, containerized FastAPI + DVC + MLflow + Prometheus/Grafana stack, reusing the
-architectural patterns of [`rakuten_mlops_services`](https://github.com/zz75da/rakuten_z) scaled
-down to lightweight statistical time-series models instead of a 4-encoder multimodal classifier —
-the whole repo (code + data + models) is a few MB, well under the 20 GB target.
+temperature effects (heating degree-days) and forecast with Holt-Winters, SARIMA, and a pooled
+multi-country LightGBM model. Started as a France-only rebuild of `P9_01_notebook.ipynb`
+(OpenClassrooms P9) and now supports **7 countries** (France, USA, Germany, Austria, Luxembourg,
+UK, Finland — selectable from the Streamlit UI), each trained and served independently. Small,
+containerized FastAPI + DVC + MLflow + Prometheus/Grafana stack, reusing the architectural patterns
+of [`rakuten_mlops_services`](https://github.com/zz75da/rakuten_z) scaled down to lightweight
+statistical/ML time-series models instead of a 4-encoder multimodal classifier — the whole repo
+(code + data + models) is a few MB, well under the 20 GB target.
 
 **Best model (France):** SARIMA(0,1,1)(1,1,1)₁₂ on the temperature-corrected, log-transformed
 series — **MAPE = 2.22%** on the 2019 out-of-sample backtest (quality-gate threshold: < 10%).
@@ -21,6 +22,7 @@ series — **MAPE = 2.22%** on the 2019 out-of-sample backtest (quality-gate thr
 
 ## Table of Contents
 
+- [Why This Stack](#why-this-stack)
 - [Model Overview](#model-overview)
 - [Architecture](#architecture)
 - [Services](#services)
@@ -32,7 +34,26 @@ series — **MAPE = 2.22%** on the 2019 out-of-sample backtest (quality-gate thr
 - [Test Suite](#test-suite)
 - [Repository Structure](#repository-structure)
 - [Environment Variables](#environment-variables)
-- [What Was Scaled Down From rakuten_mlops_services, and Why](#what-was-scaled-down-from-rakuten_mlops_services-and-why)
+
+---
+
+## Why This Stack
+
+Every non-obvious infrastructure choice below has a reason and, where it costs something, an
+explicit note on how that cost is handled — not just a list of technologies.
+
+| Choice | Why | Trade-off & how it's handled |
+|---|---|---|
+| **FastAPI, split into `train-api` + `predict-api`** | Async-capable, free request validation + OpenAPI docs via Pydantic. Splitting training (slow, resource-heavy statsmodels/LightGBM fits) from serving (latency-sensitive) means a training run never blocks or competes with prediction requests. | Two services have to be kept in sync — `predict-api` doesn't automatically see a freshly trained model. Handled with an explicit `POST /reload-artifacts` call, which Streamlit fires automatically right after a training run succeeds, rather than a shared database or polling. |
+| **In-memory threaded job registry, not Celery/RQ** | Training one country takes seconds; a full task queue (broker + worker pool) is disproportionate infrastructure for that workload. | An in-memory registry doesn't survive a container restart. Handled by also persisting every job's result to `data/jobs/*.json` and recovering it on startup — an interrupted job is marked `"interrupted"` explicitly rather than silently lost. |
+| **DVC for pipeline/artifact versioning** | Reproducible pipeline (`dvc repro`), visualized as a DAG on DagsHub, without bloating git history with binary model files. | Can drift out of sync with reality if a pipeline's scope creeps. Handled by keeping it narrow and honest: `dvc.yaml` covers France's pipeline only (documented as such), and raw data is committed directly rather than DVC-tracked, since it's a few hundred KB. |
+| **MLflow tracking via DagsHub, not self-hosted** | Real experiment tracking (params/metrics/tags per run) without running an MLflow server + Postgres + object storage. | The full `mlflow` package hard-depends on `pyarrow` — which turned out to crash LightGBM natively on Windows the moment both were imported in the same process (a real incident hit and isolated while building this, not a hypothetical). Handled by switching to `mlflow-skinny`, same tracking-client API, none of the unused server/UI dependencies. Logging is also best-effort: training never fails just because DagsHub is unreachable. |
+| **Prometheus + Grafana** | The same observability pattern a production stack would use — per-country, per-model MAPE/RMSE, service health, and request latency, queryable and dashboarded rather than only logged. | Two extra containers for what's still a small project. Accepted deliberately: they're free and tiny, and the point is to demonstrate the real pattern rather than skip observability because current scale doesn't strictly demand it. |
+| **Docker Compose, not Kubernetes** | Five services on one machine; nothing here needs horizontal scaling, rolling updates, or a service mesh. | A straightforward scope match rather than a trade-off — revisit only if that stops being true. |
+| **Streamlit for the UI** | A working multi-page interface (training trigger, forecasting, historical browsing, cross-country analytics) with no separate frontend build step. | Streamlit re-runs the whole script on every interaction, which would mean re-fetching or recomputing on every click. Handled with `@st.cache_data(ttl=...)` on the country list and the 2019 comparison analysis, so repeat interactions don't re-hit the APIs or reprocess CSVs each time. |
+| **Statistical models + one pooled global LightGBM, not deep learning** | With ~70-130 monthly rows per country, classical models and a shallow pooled gradient-boosted model are the evidence-backed choice for this data shape (M5-competition findings, the Global Forecasting Models literature) — deep learning needs far more series/data to avoid overfitting here. | Not state-of-the-art next to 2024-2025 foundation time-series models. Handled by researching and documenting that trade-off explicitly rather than ignoring it (see [Model Overview](#model-overview)) — N-BEATS/N-HiTS and Chronos/TimeGPT were evaluated and consciously deferred, not overlooked. |
+| **Data connectors kept out of the running containers** | `train-api`/`predict-api` never need third-party API credentials or outbound network access — only local files (see [Multi-Country Data](#multi-country-data)). | Syncing a country's data becomes a separate, manual-or-scheduled step rather than automatic. Handled with one documented entry point (`scripts/sync_country_data.py`) that can be put on a schedule (cron/GitHub Actions) if automated refresh is wanted later. |
+| **`predict-api` duplicates `train-api`'s model-loading code** rather than sharing a library | Genuine service independence — `predict-api` can be deployed, restarted, or scaled without depending on `train-api`'s codebase at all. | A change to the artifact format has to be applied in two places. Accepted as a deliberate trade-off favoring independence over DRY, matching the same pattern used in `rakuten_mlops_services`. |
 
 ---
 
@@ -42,15 +63,29 @@ Two-stage pipeline, faithfully ported from the notebook:
 
 1. **Temperature correction** — OLS regression `Consommation ~ const + DJU` (R²≈0.94). The
    DJU-driven component is subtracted: `Conso_correction = Consommation − coef_DJU × DJU`.
-2. **Forecasting** on `Conso_correction`, two candidate models trained and backtested on a
-   held-out year (2019), best one selected automatically by MAPE:
+2. **Forecasting** on `Conso_correction`, three candidate models trained and backtested on a
+   held-out year, best one selected automatically by MAPE:
    - **Holt-Winters** — triple exponential smoothing, `trend='add'`, `seasonal='add'`, period 12.
    - **SARIMA(0,1,1)(1,1,1)₁₂** — fit on `log(Conso_correction)`, forecast exponentiated back.
      Selected via ACF/PACF identification + Ljung-Box whiteness test + Shapiro normality test
      (see `notebooks/P9_01_notebook.ipynb` for the full diagnostic walkthrough).
+   - **`ml_global`** — a single LightGBM model (via Nixtla's `mlforecast`) trained on **all 7
+     countries' series pooled together**, not one ML model per country. With only ~70-130 monthly
+     rows per country, a per-country ML model would overfit badly; pooling is the well-evidenced
+     fix for exactly this data shape (M5-competition findings, the "Global Forecasting Models"
+     literature — shallow/regularized global models tolerate few series far better than deep
+     learning does). See `train-api/services/trainer_ml.py`'s module docstring for the backtest
+     methodology (each country's own `test_year` cutoff is respected — no country's held-out rows
+     ever leak into another's backtest fit). Skips cleanly (`model_ml_global.min_countries_required`
+     in `params.yaml`) rather than crashing if too few countries have synced data yet.
 
-Both models are refit on the *full* series after backtesting and saved — `predict-api` serves
-whichever one won the backtest.
+All three candidates are refit on the *full* series (the ML candidate on the full pooled dataset)
+after backtesting and saved — `predict-api` serves whichever one won the backtest, per country.
+
+**Considered, deferred**: deep learning (N-BEATS/N-HiTS) and 2024-2025 foundation time-series
+models (Chronos, TimeGPT) were researched but not implemented — both need far more series/data
+than 7 countries provide to pay off, and Chronos in particular would pull in PyTorch, breaking
+this repo's lightweight-Docker-image ethos for an unclear accuracy win at this scale.
 
 ---
 
@@ -94,7 +129,8 @@ whichever one won the backtest.
 | **grafana** | 3000 | Dashboards: MAPE/RMSE by model, service health, latency |
 | **MLflow** | — | DagsHub-hosted experiment tracking (same pattern as rakuten_mlops_services) |
 
-No JWT gateway, Airflow, or Kubernetes here — see [why](#what-was-scaled-down-from-rakuten_mlops_services-and-why).
+No JWT gateway, Airflow, or Kubernetes here — the training workload is small enough (seconds per
+run) that a `/train` call or a cron job covers it without that infrastructure.
 
 ---
 
@@ -191,30 +227,37 @@ methodology (OLS temperature correction + Holt-Winters/SARIMA backtest-and-selec
 | Country | Source | Auth | Status |
 |---|---|---|---|
 | France | [RTE Open Data](https://opendata.reseaux-energies.fr/explore/dataset/equilibre-national-mensuel-prod-conso-brute/), static historical export | none | committed (132 months, 2009–2019) |
-| Germany | [SMARD](https://www.smard.de) (Bundesnetzagentur grid load, filter 410) | none | committed (72 months, 2019–2024) |
+| Germany | [SMARD](https://www.smard.de) (Bundesnetzagentur grid load, region=DE, filter 410) | none | committed (72 months, 2019–2024) |
+| Austria | [SMARD](https://www.smard.de) (region=AT — same platform as Germany) | none | committed (120 months, 2015–2024) |
+| Luxembourg | [SMARD](https://www.smard.de) (region=LU — same platform as Germany) | none | committed (120 months, 2015–2024) |
 | USA | [EIA API v2](https://www.eia.gov/opendata/) retail-sales, natively monthly | free instant key | committed (120 months, 2015–2024) |
 | UK | [NESO Historic Demand Data](https://www.neso.energy/data-portal/historic-demand-data) (national demand, half-hourly) | none | committed (120 months, 2015–2024) |
 | Finland | [Fingrid](https://data.fingrid.fi) dataset 124, consumption (15-min) | free instant key | committed (120 months, 2015–2024) |
 
-All 5 countries are synced and trained — SARIMA/Holt-Winters backtest MAPE ranges from 1.3%
-(Germany) to 5.2% (UK), all well under the 10% quality-gate threshold. Re-run
-`scripts/sync_country_data.py` any time to refresh a country's data with a later end date.
+All 7 countries are synced and trained — best-candidate backtest MAPE ranges from 1.3%
+(Germany) to 8.9% (Luxembourg, a much smaller/noisier grid), all under the 10% quality-gate
+threshold. Re-run `scripts/sync_country_data.py` any time to refresh a country's data with a
+later end date.
 
-Temperature/degree-days for the 4 non-France countries come from the free, no-key
+Germany, Austria, and Luxembourg all share the same connector (`connectors/smard.py`) — SMARD is
+one platform serving all three (a legacy of the joint DE-AT-LU bidding zone before Austria split
+out in 2018), parameterized by SMARD's `region` code rather than three near-duplicate files.
+
+Temperature/degree-days for the 6 non-France countries come from the free, no-key
 [Open-Meteo Historical Weather API](https://open-meteo.com/en/docs/historical-weather-api),
 converted to heating-degree-days with the same convention as the French DJU series
 (`connectors/degree_days.py`) — so `preprocess.py`'s OLS math never changes, only where the
 DJU numbers come from.
 
 **Architecture**: `connectors/` (top-level package, adapter pattern — one `CountryConnector`
-subclass per country, picked via `connectors/registry.py`) is **host-run only**, never imported
-by the `train-api`/`predict-api` containers — neither service needs third-party API credentials
-or outbound network access, only local files. `scripts/sync_country_data.py --country <code>`
-fetches + validates (via `train-api/services/schemas.py`'s pydantic checks) + writes
+subclass per country/platform, picked via `connectors/registry.py`) is **host-run only**, never
+imported by the `train-api`/`predict-api` containers — neither service needs third-party API
+credentials or outbound network access, only local files. `scripts/sync_country_data.py --country
+<code>` fetches + validates (via `train-api/services/schemas.py`'s pydantic checks) + writes
 `data/raw/<country>/*.csv`, which `train-api` then reads exactly like France's static CSVs.
 
 ```bash
-cp .env.template .env             # fill in EIA_API_KEY / FINGRID_API_KEY (Germany + UK need no key)
+cp .env.template .env             # fill in EIA_API_KEY / FINGRID_API_KEY (SMARD-based countries need no key)
 python scripts/sync_country_data.py --country usa --start 2015-01 --end 2024-12
 # or sync every wired-up country at once:
 python scripts/sync_country_data.py --country all --start 2015-01 --end 2024-12
@@ -225,17 +268,24 @@ post-test-year history for a meaningful backtest, then `POST /train {"country": 
 `tests/data_quality/` validates whichever countries are currently synced and skips the rest —
 CI stays green regardless of which API keys have been supplied.
 
-**"Comparaison 2019" page** — 2019 is the only calendar year every country has a complete
-series for (France's static export ends there; the other four's synced range starts there),
-so it's the one honest apples-to-apples comparison point. The page reads all 5 countries'
-raw CSVs directly (no training required) and computes, live: total and per-capita 2019
-consumption (World Bank population estimates), the monthly seasonality profile as a %
-of each country's own annual total (so countries of very different scale overlay on one
-axis), and each country's temperature sensitivity — the slope and R² of `Consommation ~
-DJU` — shown as small-multiple scatter panels. The one finding this consistently surfaces:
-the USA is the only country where summer (Jun–Aug) outweighs winter (Dec–Feb) in the
-annual total, an air-conditioning signature the four heating-dominated European countries
-don't share.
+**"2019 Comparison" page** — 2019 is the only calendar year every country has a complete
+series for (France's static export ends there; the other six's synced range starts there),
+so it's the one honest apples-to-apples comparison point. The page reads all 7 countries'
+raw CSVs directly (no training required) and computes, live: total, per-capita, and
+GDP-normalized ("energy intensity") 2019 consumption (World Bank population/GDP estimates —
+per-capita and intensity answer different questions, a lifestyle-volume measure vs. an
+economic-efficiency one, and reporting only one is a recognized gap in this kind of
+comparison); the monthly seasonality profile as a % of each country's own annual total;
+a Pearson correlation heatmap of those seasonality profiles (which countries share the same
+month-to-month shape, independent of their consumption levels); and each country's
+temperature sensitivity — the slope and R² of `Consommation ~ DJU`, with proper OLS
+inference (standard error, 95% CI, p-value on the slope) since n=12 per country is a real
+statistical-power limit, shown as small-multiple scatter panels plus an explicit
+Methodology & Limitations note. The one finding this consistently surfaces: the USA is the
+only country where summer (Jun–Aug) outweighs winter (Dec–Feb) in the annual total — and its
+DJU slope's 95% CI actually crosses zero (p≈0.19), confirming this repo's heating-only
+degree-day model has no term for the air-conditioning-driven demand that explains it,
+rather than USA demand being genuinely temperature-insensitive.
 
 ---
 
@@ -278,6 +328,7 @@ python scripts/run_quality_gate_ci.py --country france && pytest train-api/tests
 | `tests/data_quality/test_raw_data_quality.py` | Per-country schema validation + test_year sanity, skips unsynced countries |
 | `tests/unit/test_preprocess.py` | OLS temperature regression + seasonal decomposition |
 | `tests/unit/test_trainers.py` | Holt-Winters / SARIMA fit + forecast shapes and confidence intervals |
+| `tests/unit/test_trainer_ml.py` | Pooled multi-country LightGBM: pooling/truncation, fit+forecast round-trip, graceful skip on a bad country |
 | `tests/unit/test_evaluate.py` | RMSE / MAPE formulas against known values |
 | `tests/unit/test_artifacts.py` | Save/load roundtrip, SHA256 sidecars, best-model selection, multi-country namespace isolation |
 | `tests/unit/test_schemas.py` | Pydantic ingestion-boundary validation (schemas.py) |
@@ -299,6 +350,7 @@ elec_prediction/
 │   │   ├── preprocess.py           # OLS Consommation~DJU + seasonal_decompose (notebook cells 25-47)
 │   │   ├── trainer_holtwinters.py  # ExponentialSmoothing (notebook cell 56)
 │   │   ├── trainer_sarima.py       # SARIMA(0,1,1)(1,1,1)12, log-transform (notebook cells 90-96)
+│   │   ├── trainer_ml.py           # ml_global: pooled multi-country LightGBM via mlforecast
 │   │   ├── evaluate.py             # RMSE, MAPE (notebook cells 95-96)
 │   │   ├── artifacts.py            # atomic save/load + SHA256, namespaced under ARTIFACTS_PATH/<country>/
 │   │   ├── schemas.py              # pydantic ingestion-boundary validation (DataQualityError)
@@ -307,12 +359,12 @@ elec_prediction/
 ├── predict-api/
 │   ├── app.py                      # /predict · /reload-artifacts · /health · /metrics — per-country model state
 │   └── services/{model_loader,forecast}.py
-├── streamlit/app_streamlit.py      # UI: country selector, train trigger, forecast charts,
-│                                    # historical data, "Comparaison 2019" cross-country page
+├── streamlit/app_streamlit.py      # UI (English): country selector w/ flags, train trigger,
+│                                    # forecast charts, historical data, "2019 Comparison" page
 ├── connectors/                     # host-run only — never imported by train-api/predict-api containers
 │   ├── registry.py                 # ConnectorSpec per country (adapter pattern, config-driven)
 │   ├── base.py, open_meteo.py, degree_days.py
-│   └── usa_eia.py, germany_smard.py, uk_neso.py, finland_fingrid.py
+│   └── usa_eia.py, smard.py (DE/AT/LU), uk_neso.py, finland_fingrid.py
 ├── monitoring/
 │   ├── prometheus.yml
 │   ├── alert-rules.yml
@@ -348,25 +400,6 @@ Copy `.env.template` to `.env`:
 
 MLflow logging in `train-api/app.py` is **best-effort**: if `MLFLOW_TRACKING_URI` isn't set, training
 still runs and artifacts still save — only the MLflow run logging is skipped.
-
----
-
-## What Was Scaled Down From rakuten_mlops_services, and Why
-
-`rakuten_mlops_services` serves a 4-encoder multimodal (text+image) classifier over ~85k products
-and needs Airflow orchestration, a JWT gate-api, dedicated GPU-ish encoder containers, and
-Prometheus/Grafana/Alertmanager at full scale (14 services, ~20 GB with data+models).
-`elec_prediction` forecasts a single 132-row monthly time series with two lightweight statistical
-models (no GPU, no large embeddings) — so this repo keeps the parts of that architecture that
-still pay for themselves at this scale:
-
-- **kept:** FastAPI train/predict split, async job registry pattern, DVC pipeline, MLflow/DagsHub
-  tracking, Docker Compose, Prometheus + Grafana + alert rules, pytest unit/integration/quality-gate
-  structure, GitHub Actions CI.
-- **dropped:** JWT gate-api (no multi-user auth need for a single-model demo), Airflow (a `/train`
-  call or a cron job is enough for a model that retrains in seconds, not hours), Kubernetes PoC
-  (nothing here needs horizontal scaling), Alertmanager/pushgateway/minio/postgres (no batch jobs,
-  no object storage needed for KB-sized artifacts).
 
 ---
 

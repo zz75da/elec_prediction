@@ -1,17 +1,24 @@
 """Config-driven connector lookup — one entry per country, chosen by code rather than
-hardcoded branching. Adding a 6th country is one new connector module + one entry here.
+hardcoded branching. Adding a new country is one new connector module (or, for a platform
+that already covers multiple countries like SMARD, one new registry entry reusing the
+existing connector class via connector_kwargs) plus one entry here.
 
 France is deliberately absent from CONNECTOR_CLS (connector_cls=None): its data is a static
 historical export (scripts/extract_raw_data.py), not synced from a live API.
 """
-from dataclasses import dataclass
-from typing import Optional, Type
+from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Type
 
 from .base import CountryConnector
 from .finland_fingrid import FingridConnector
-from .germany_smard import SmardConnector
+from .smard import SmardConnector
 from .uk_neso import NesoConnector
 from .usa_eia import EiaConnector
+
+SMARD_ATTRIBUTION = (
+    "Contains data from SMARD.de (Bundesnetzagentur), licensed under the "
+    "Datenlizenz Deutschland – Namensnennung 2.0 (dl-de/by-2.0)"
+)
 
 
 @dataclass(frozen=True)
@@ -24,6 +31,7 @@ class ConnectorSpec:
     degree_day_base_c: float = 18.0
     api_key_env: Optional[str] = None
     attribution: Optional[str] = None
+    connector_kwargs: Dict[str, Any] = field(default_factory=dict)  # extra constructor args, e.g. SMARD's region
 
 
 REGISTRY = {
@@ -38,6 +46,20 @@ REGISTRY = {
     "germany": ConnectorSpec(
         code="germany", label="Germany", connector_cls=SmardConnector,
         latitude=52.5, longitude=13.4,  # Berlin
+        attribution=SMARD_ATTRIBUTION,
+        connector_kwargs={"region": "DE", "country_code": "germany"},
+    ),
+    "austria": ConnectorSpec(
+        code="austria", label="Austria", connector_cls=SmardConnector,
+        latitude=48.2, longitude=16.4,  # Vienna
+        attribution=SMARD_ATTRIBUTION,
+        connector_kwargs={"region": "AT", "country_code": "austria"},
+    ),
+    "luxembourg": ConnectorSpec(
+        code="luxembourg", label="Luxembourg", connector_cls=SmardConnector,
+        latitude=49.6, longitude=6.1,  # Luxembourg City
+        attribution=SMARD_ATTRIBUTION,
+        connector_kwargs={"region": "LU", "country_code": "luxembourg"},
     ),
     "uk": ConnectorSpec(
         code="uk", label="United Kingdom", connector_cls=NesoConnector,

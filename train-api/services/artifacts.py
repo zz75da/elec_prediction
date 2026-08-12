@@ -9,12 +9,17 @@
 # (ecriture via fichier temporaire + os.replace + empreinte SHA256).
 #
 # Fonctions principales :
-#   - save_artifacts(ols_results, hw_model, sarima_results, metadata,
-#     history, country="france") : ecrit dans ARTIFACTS_PATH/<country>/
-#     ols_model.pkl, holt_winters_model.pkl, sarima_model.pkl,
-#     model_metadata.json, train_history.json (+ .sha256 pour les pickles)
-#   - load_deployment_model(country) -> objet modele + type ("holt_winters"|"sarima")
-#     choisi via model_metadata.json["best_model"]
+#   - save_artifacts(ols_results, models, metadata, history,
+#     country="france") : ecrit dans ARTIFACTS_PATH/<country>/ un
+#     fichier ols_model.pkl + un fichier "<nom>_model.pkl" par
+#     entree du dict `models` (ex: holt_winters_model.pkl,
+#     sarima_model.pkl, ml_global_model.pkl), model_metadata.json,
+#     train_history.json (+ .sha256 pour les pickles). Le dict
+#     generique (plutot que des arguments positionnels fixes)
+#     permet d'ajouter un 4e candidat sans toucher ce fichier.
+#   - load_deployment_model(country) -> objet modele + type,
+#     choisi via model_metadata.json["best_model"] — dispatch
+#     generique par nom de fichier, pas de if/else par modele
 #   - load_metadata(country) -> dict
 #
 # Variables / constantes importantes :
@@ -28,6 +33,7 @@ import os
 import pickle
 import tempfile
 from time import time
+from typing import Any, Dict
 
 ARTIFACTS_PATH = os.getenv("ARTIFACTS_PATH", "data/artifacts")
 
@@ -50,8 +56,7 @@ def _atomic_pickle_dump(obj, path: str):
 
 def save_artifacts(
     ols_results,
-    hw_model,
-    sarima_results,
+    models: Dict[str, Any],
     metadata: dict,
     history: dict,
     country: str = "france",
@@ -59,8 +64,13 @@ def save_artifacts(
     """
     Persist every artifact from a training run, namespaced under ARTIFACTS_PATH/<country>/.
 
+    `models` maps a model name (e.g. "holt_winters", "sarima", "ml_global") to its fitted
+    object; each is written as "<name>_model.pkl". A None value is skipped (lets a candidate
+    that was disabled/unavailable for this run — e.g. ml_global below min_countries_required —
+    be omitted cleanly).
+
     metadata must contain at least:
-      {"best_model": "holt_winters"|"sarima", "sarima_log_transform": bool,
+      {"best_model": <one of models' keys>, "sarima_log_transform": bool,
        "metrics": {...}, "params": {...}}
     history is the flat dict written to train_history.json for the quality gate.
     """
@@ -69,8 +79,9 @@ def save_artifacts(
     t0 = time()
 
     _atomic_pickle_dump(ols_results, os.path.join(country_dir, "ols_model.pkl"))
-    _atomic_pickle_dump(hw_model, os.path.join(country_dir, "holt_winters_model.pkl"))
-    _atomic_pickle_dump(sarima_results, os.path.join(country_dir, "sarima_model.pkl"))
+    for name, obj in models.items():
+        if obj is not None:
+            _atomic_pickle_dump(obj, os.path.join(country_dir, f"{name}_model.pkl"))
 
     with open(os.path.join(country_dir, "model_metadata.json"), "w") as f:
         json.dump(metadata, f, indent=2, default=str)
@@ -78,7 +89,8 @@ def save_artifacts(
     with open(os.path.join(country_dir, "train_history.json"), "w") as f:
         json.dump(history, f, indent=2, default=str)
 
-    print(f"[Artifacts] Saved ols/holt_winters/sarima models + metadata in {time() - t0:.2f}s -> {country_dir}")
+    saved_names = ", ".join(n for n, o in models.items() if o is not None)
+    print(f"[Artifacts] Saved ols/{saved_names} models + metadata in {time() - t0:.2f}s -> {country_dir}")
 
 
 def load_metadata(country: str = "france") -> dict:
@@ -116,6 +128,4 @@ def load_deployment_model(country: str = "france"):
     """
     metadata = load_metadata(country)
     best = metadata.get("best_model", "sarima")
-    if best == "holt_winters":
-        return _load_pickle("holt_winters_model.pkl", country), "holt_winters"
-    return _load_pickle("sarima_model.pkl", country), "sarima"
+    return _load_pickle(f"{best}_model.pkl", country), best

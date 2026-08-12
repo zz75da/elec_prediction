@@ -8,11 +8,17 @@ scipy==1.14.1
 statsmodels==0.14.4
 scikit-learn==1.6.0
 openpyxl==3.1.5
+lightgbm==4.7.0
+mlforecast==1.1.0
 
 matplotlib==3.9.3
 seaborn==0.13.2
 
-mlflow==2.17.2
+# mlflow-skinny, not mlflow — see train-api/requirements.txt's comment: the full mlflow
+# package hard-depends on pyarrow, which crashes LightGBM natively on Windows the moment
+# both are imported in the same process. mlflow-skinny has the same tracking-client API
+# (log_params/log_metrics/start_run/set_tag) without pulling in pyarrow.
+mlflow-skinny==2.17.2
 dagshub==0.7.0
 dvc[s3]==3.60.0
 

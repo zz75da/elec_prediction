@@ -120,7 +120,7 @@ def test_full_train_predict_cycle(train_client, predict_client):
         time.sleep(1)
 
     assert status["status"] == "success", status.get("error")
-    assert status["best_model"] in ("holt_winters", "sarima")
+    assert status["best_model"] in status["metrics"].keys()  # self-consistent, doesn't hardcode the candidate set
     assert status["metrics"][status["best_model"]]["mape"] < 30  # generous — real gate is in test_model_quality.py
 
     reload_resp = predict_client.post("/reload-artifacts")

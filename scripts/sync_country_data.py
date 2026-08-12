@@ -44,7 +44,7 @@ def sync_one(country: str, start: str, end: str) -> None:
         api_key = None
 
     print(f"[{country}] Fetching consumption from {spec.connector_cls.__name__}...")
-    connector = spec.connector_cls(api_key=api_key)
+    connector = spec.connector_cls(api_key=api_key, **spec.connector_kwargs)
     conso_df = connector.fetch_consumption(start, end)
 
     start_date = pd.Timestamp(start).strftime("%Y-%m-%d")
@@ -75,7 +75,8 @@ def main() -> None:
     load_dotenv(REPO_ROOT / ".env")
 
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--country", required=True, help="Country code (usa, germany, uk, finland, or 'all')")
+    parser.add_argument("--country", required=True,
+                         help="Country code (usa, germany, austria, luxembourg, uk, finland, or 'all')")
     parser.add_argument("--start", required=True, help="Start month, YYYY-MM")
     parser.add_argument("--end", required=True, help="End month, YYYY-MM")
     args = parser.parse_args()

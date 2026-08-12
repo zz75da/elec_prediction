@@ -1,6 +1,4 @@
 """Unit tests for train-api/services/artifacts.py — save/load roundtrip, no statsmodels dependency."""
-import json
-
 import pytest
 
 from services import artifacts
@@ -18,8 +16,7 @@ def test_save_and_load_metadata(tmp_path):
 
     artifacts.save_artifacts(
         ols_results={"dummy": "ols"},
-        hw_model={"dummy": "hw"},
-        sarima_results={"dummy": "sarima"},
+        models={"holt_winters": {"dummy": "hw"}, "sarima": {"dummy": "sarima"}},
         metadata=metadata,
         history=history,
     )
@@ -35,8 +32,7 @@ def test_load_deployment_model_picks_best(tmp_path):
     metadata = {"best_model": "holt_winters", "metrics": {}}
     artifacts.save_artifacts(
         ols_results={"dummy": "ols"},
-        hw_model={"model": "hw-object"},
-        sarima_results={"model": "sarima-object"},
+        models={"holt_winters": {"model": "hw-object"}, "sarima": {"model": "sarima-object"}},
         metadata=metadata,
         history={"best_model": "holt_winters", "metrics": {}},
     )
@@ -46,9 +42,37 @@ def test_load_deployment_model_picks_best(tmp_path):
     assert model == {"model": "hw-object"}
 
 
+def test_load_deployment_model_picks_ml_global(tmp_path):
+    """The generic dict-based dispatch must work for any model name, not just the original two."""
+    metadata = {"best_model": "ml_global", "metrics": {}}
+    artifacts.save_artifacts(
+        ols_results={"dummy": "ols"},
+        models={"holt_winters": {"model": "hw"}, "sarima": {"model": "sarima"}, "ml_global": {"model": "lgbm"}},
+        metadata=metadata,
+        history={"best_model": "ml_global", "metrics": {}},
+    )
+
+    model, model_type = artifacts.load_deployment_model()
+    assert model_type == "ml_global"
+    assert model == {"model": "lgbm"}
+
+
+def test_save_artifacts_skips_none_model(tmp_path):
+    """A candidate that didn't run this training pass (e.g. ml_global below
+    min_countries_required) is passed as None and must not produce a pickle file."""
+    artifacts.save_artifacts(
+        ols_results={"dummy": "ols"},
+        models={"holt_winters": {"model": "hw"}, "sarima": {"model": "sarima"}, "ml_global": None},
+        metadata={"best_model": "sarima", "metrics": {}},
+        history={},
+    )
+    assert not (tmp_path / "france" / "ml_global_model.pkl").exists()
+    assert (tmp_path / "france" / "sarima_model.pkl").exists()
+
+
 def test_sha256_sidecar_written(tmp_path):
     artifacts.save_artifacts(
-        ols_results={"a": 1}, hw_model={"b": 2}, sarima_results={"c": 3},
+        ols_results={"a": 1}, models={"holt_winters": {"b": 2}, "sarima": {"c": 3}},
         metadata={"best_model": "sarima", "metrics": {}}, history={},
     )
     assert (tmp_path / "france" / "sarima_model.pkl.sha256").exists()
@@ -62,12 +86,14 @@ def test_load_metadata_missing_raises(tmp_path):
 def test_save_and_load_roundtrip_multiple_countries(tmp_path):
     """The core namespace-isolation guarantee: two countries' artifacts never collide."""
     artifacts.save_artifacts(
-        ols_results={"dummy": "ols-fr"}, hw_model={"dummy": "hw-fr"}, sarima_results={"dummy": "sarima-fr"},
+        ols_results={"dummy": "ols-fr"},
+        models={"holt_winters": {"dummy": "hw-fr"}, "sarima": {"dummy": "sarima-fr"}},
         metadata={"best_model": "sarima", "metrics": {"sarima": {"mape": 2.22}}},
         history={"best_model": "sarima", "metrics": {}}, country="france",
     )
     artifacts.save_artifacts(
-        ols_results={"dummy": "ols-usa"}, hw_model={"dummy": "hw-usa"}, sarima_results={"dummy": "sarima-usa"},
+        ols_results={"dummy": "ols-usa"},
+        models={"holt_winters": {"dummy": "hw-usa"}, "sarima": {"dummy": "sarima-usa"}},
         metadata={"best_model": "holt_winters", "metrics": {"holt_winters": {"mape": 5.0}}},
         history={"best_model": "holt_winters", "metrics": {}}, country="usa",
     )

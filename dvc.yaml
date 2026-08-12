@@ -34,23 +34,38 @@ stages:
       - data/processed/france/conso_corrigee.csv
 
   train_and_evaluate:
-    desc: "Fit Holt-Winters + SARIMA(0,1,1)(1,1,1)12, backtest on the held-out test_year, select best model — France"
+    desc: >
+      Fit Holt-Winters + SARIMA(0,1,1)(1,1,1)12 + a pooled multi-country LightGBM
+      (model_ml_global) for France, backtest on the held-out test_year, select best model.
+      The France artifact now depends on every other country's raw data too, since the
+      ml_global candidate pools all 5 countries — hence the extra deps below.
     cmd: >
       curl -s -X POST http://localhost:5010/train -H "Content-Type: application/json" -d '{"country": "france"}'
     deps:
       - data/processed/france/conso_corrigee.csv
+      - data/raw/usa/consommation_mensuelle.csv
+      - data/raw/usa/dju_mensuel.csv
+      - data/raw/germany/consommation_mensuelle.csv
+      - data/raw/germany/dju_mensuel.csv
+      - data/raw/uk/consommation_mensuelle.csv
+      - data/raw/uk/dju_mensuel.csv
+      - data/raw/finland/consommation_mensuelle.csv
+      - data/raw/finland/dju_mensuel.csv
       - train-api/services/trainer_holtwinters.py
       - train-api/services/trainer_sarima.py
+      - train-api/services/trainer_ml.py
       - train-api/services/evaluate.py
       - train-api/app.py
     params:
       - data.countries.france.test_year
       - model_holt_winters
       - model_sarima
+      - model_ml_global
     outs:
       - data/artifacts/france/ols_model.pkl
       - data/artifacts/france/holt_winters_model.pkl
       - data/artifacts/france/sarima_model.pkl
+      - data/artifacts/france/ml_global_model.pkl
     metrics:
       - data/artifacts/france/model_metadata.json:
           cache: false
