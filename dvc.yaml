@@ -1,51 +1,58 @@
 # DVC pipeline definition — displayed as a DAG on DagsHub.
-# Mirrors data/raw (already committed, DVC-tracked) through preprocessing to
+# Mirrors data/raw/france (already committed, DVC-tracked) through preprocessing to
 # the two candidate models and the backtest evaluation. `dvc repro` runs the
 # whole thing locally (used in CI / dev); train-api's POST /train runs the
 # same steps in-process for the live service (see train-api/app.py).
+#
+# Scoped to France only — the other countries (usa/germany/uk/finland, see
+# connectors/ + scripts/sync_country_data.py) are trained on demand via
+# POST /train {"country": "usa"} (or `python scripts/run_quality_gate_ci.py
+# --country usa` locally), not through this DVC-tracked pipeline. A `foreach`
+# matrix over data.countries is a natural follow-up if all 5 need repro'ing.
 
 stages:
   preprocess:
-    desc: "OLS temperature correction (Consommation ~ DJU) + additive seasonal decomposition"
+    desc: "OLS temperature correction (Consommation ~ DJU) + additive seasonal decomposition — France"
     cmd: python -c "
       import yaml, sys; sys.path.insert(0, 'train-api');
       from services import data_loader, preprocess;
       p = yaml.safe_load(open('params.yaml'));
-      df = data_loader.load_merged(p['data']['raw_conso_path'], p['data']['raw_dju_path']);
+      cfg = p['data']['countries']['france'];
+      df = data_loader.load_merged(cfg['raw_conso_path'], cfg['raw_dju_path'], country='france');
       df, ols, stats = preprocess.run_preprocessing(df, seasonal_periods=p['preprocess']['seasonal_periods']);
-      df.to_csv(p['data']['processed_path']);
+      df.to_csv(cfg['processed_path']);
       print(stats)
       "
     deps:
-      - data/raw/consommation_mensuelle.csv
-      - data/raw/dju_mensuel.csv
+      - data/raw/france/consommation_mensuelle.csv
+      - data/raw/france/dju_mensuel.csv
       - train-api/services/data_loader.py
       - train-api/services/preprocess.py
     params:
       - preprocess.seasonal_periods
     outs:
-      - data/processed/conso_corrigee.csv
+      - data/processed/france/conso_corrigee.csv
 
   train_and_evaluate:
-    desc: "Fit Holt-Winters + SARIMA(0,1,1)(1,1,1)12, backtest on the held-out test_year, select best model"
+    desc: "Fit Holt-Winters + SARIMA(0,1,1)(1,1,1)12, backtest on the held-out test_year, select best model — France"
     cmd: >
-      curl -s -X POST http://localhost:5010/train -H "Content-Type: application/json" -d '{}'
+      curl -s -X POST http://localhost:5010/train -H "Content-Type: application/json" -d '{"country": "france"}'
     deps:
-      - data/processed/conso_corrigee.csv
+      - data/processed/france/conso_corrigee.csv
       - train-api/services/trainer_holtwinters.py
       - train-api/services/trainer_sarima.py
       - train-api/services/evaluate.py
       - train-api/app.py
     params:
-      - data.test_year
+      - data.countries.france.test_year
       - model_holt_winters
       - model_sarima
     outs:
-      - data/artifacts/ols_model.pkl
-      - data/artifacts/holt_winters_model.pkl
-      - data/artifacts/sarima_model.pkl
+      - data/artifacts/france/ols_model.pkl
+      - data/artifacts/france/holt_winters_model.pkl
+      - data/artifacts/france/sarima_model.pkl
     metrics:
-      - data/artifacts/model_metadata.json:
+      - data/artifacts/france/model_metadata.json:
           cache: false
-      - data/artifacts/train_history.json:
+      - data/artifacts/france/train_history.json:
           cache: false

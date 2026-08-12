@@ -8,10 +8,13 @@ OpenClassrooms project folder and/or can be re-downloaded from RTE open data):
   - DJU_meteo_chauf_ge.xlsx + calcul_DJU_10_05_2022_{a..g}.xlsx
     (8 French regions, Degrés Jours Unifiés — heating degree days, skiprows=11 header block)
 
-Outputs (already committed under data/raw/, DVC-tracked):
-  - data/raw/consommation_mensuelle.csv
-  - data/raw/dju_mensuel.csv
-  - data/raw/consommation_dju_mensuel.csv   (merged, for reference/tests)
+Outputs (already committed under data/raw/france/):
+  - data/raw/france/consommation_mensuelle.csv
+  - data/raw/france/dju_mensuel.csv
+  - data/raw/france/consommation_dju_mensuel.csv   (merged, for reference/tests)
+
+For other countries, see scripts/sync_country_data.py (fetches from live APIs via
+connectors/ instead of the original notebook's source files).
 
 Run again only if you have the original source files and want to refresh
 the raw data (e.g. extend the series past 2019-12):
@@ -25,7 +28,7 @@ from pathlib import Path
 import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-OUT_DIR = REPO_ROOT / "data" / "raw"
+OUT_DIR = REPO_ROOT / "data" / "raw" / "france"
 
 START = datetime.strptime("2008-12-01", "%Y-%m-%d")
 END = datetime.strptime("2020-01-01", "%Y-%m-%d")

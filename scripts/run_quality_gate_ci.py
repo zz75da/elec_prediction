@@ -8,8 +8,9 @@ threading/Prometheus/job-registry plumbing that only makes sense behind a
 running service.
 
 Run from the repo root:
-    python scripts/run_quality_gate_ci.py
+    python scripts/run_quality_gate_ci.py [--country france]
 """
+import argparse
 import os
 import sys
 from datetime import datetime, timezone
@@ -20,21 +21,27 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(REPO_ROOT / "train-api"))
 
-from services import artifacts, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima  # noqa: E402
+from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima  # noqa: E402
 
 
 def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--country", default="france")
+    args = parser.parse_args()
+    country = args.country
+
     os.chdir(REPO_ROOT)
     with open("params.yaml") as f:
         params = yaml.safe_load(f)
+    cfg = config.resolve_country_config(params, country)
 
     seasonal_periods = params["preprocess"]["seasonal_periods"]
-    test_year = params["data"]["test_year"]
+    test_year = cfg["test_year"]
 
-    df_merged = data_loader.load_merged(params["data"]["raw_conso_path"], params["data"]["raw_dju_path"])
+    df_merged = data_loader.load_merged(cfg["raw_conso_path"], cfg["raw_dju_path"], country=country)
     df, ols_results, stats = preprocess.run_preprocessing(df_merged, seasonal_periods=seasonal_periods)
-    os.makedirs(os.path.dirname(params["data"]["processed_path"]), exist_ok=True)
-    df.to_csv(params["data"]["processed_path"])
+    os.makedirs(os.path.dirname(cfg["processed_path"]), exist_ok=True)
+    df.to_csv(cfg["processed_path"])
 
     train_df = df[df.index.year < test_year]
     test_df = df[df.index.year == test_year]
@@ -67,6 +74,7 @@ def main():
     )
 
     metadata = {
+        "country": country,
         "best_model": best_model,
         "sarima_log_transform": sarima_cfg["log_transform"],
         "seasonal_periods": seasonal_periods,
@@ -77,6 +85,7 @@ def main():
         "trained_at": datetime.now(timezone.utc).isoformat(),
     }
     history = {
+        "country": country,
         "best_model": best_model,
         "metrics": metrics,
         "quality_gate": {
@@ -86,8 +95,9 @@ def main():
         },
     }
 
-    artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history)
+    artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history, country=country)
 
+    print(f"Country: {country}")
     print(f"Best model: {best_model}")
     print(f"Holt-Winters MAPE: {hw_metrics['mape']}%  RMSE: {hw_metrics['rmse']}")
     print(f"SARIMA MAPE:       {sarima_metrics['mape']}%  RMSE: {sarima_metrics['rmse']}")

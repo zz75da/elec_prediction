@@ -52,6 +52,8 @@ services:
     container_name: streamlit
     ports:
       - "8501:8501"
+    volumes:
+      - ./data:/app/data:ro
     environment:
       - TRAIN_API_URL=http://train-api:5010
       - PREDICT_API_URL=http://predict-api:5011

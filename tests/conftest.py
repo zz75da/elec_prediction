@@ -23,8 +23,11 @@ import pandas as pd
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(REPO_ROOT / "train-api"))
-sys.path.insert(0, str(REPO_ROOT / "predict-api"))
+sys.path.insert(0, str(REPO_ROOT))                # for `import connectors` (top-level package)
+sys.path.insert(0, str(REPO_ROOT / "train-api"))  # `import services` -> train-api/services in unit tests
+# predict-api is intentionally NOT added here: it defines its own `services` package with
+# the same name as train-api's, so tests/integration/test_api_integration.py's fixtures add
+# it locally (and purge sys.modules first) only when a test actually needs predict-api's app.
 
 
 def pytest_configure(config):

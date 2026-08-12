@@ -39,7 +39,7 @@ import sys
 import threading
 import uuid
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 import yaml
 from fastapi import FastAPI, HTTPException
@@ -47,18 +47,18 @@ from prometheus_client import Gauge
 from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import BaseModel
 
-from services import artifacts, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima
+from services import artifacts, config, data_loader, evaluate, preprocess, trainer_holtwinters, trainer_sarima
 from utils.logger import get_logger
 
 logger = get_logger()
 app = FastAPI(title="Train API — elec_prediction", description="Temperature correction + Holt-Winters/SARIMA training", version="1.0")
 
 # --- Prometheus metrics ---
-model_mape_gauge = Gauge("model_mape", "Backtest MAPE (%) on the held-out test year", ["model"])
-model_rmse_gauge = Gauge("model_rmse", "Backtest RMSE on the held-out test year", ["model"])
-model_best_gauge = Gauge("model_best_selected", "1 if this model was selected for deployment, else 0", ["model"])
-ols_r2_gauge = Gauge("ols_temperature_r2", "R2 of the Consommation ~ DJU OLS regression")
-last_train_timestamp = Gauge("train_last_run_timestamp", "Unix timestamp of the last completed training run")
+model_mape_gauge = Gauge("model_mape", "Backtest MAPE (%) on the held-out test year", ["model", "country"])
+model_rmse_gauge = Gauge("model_rmse", "Backtest RMSE on the held-out test year", ["model", "country"])
+model_best_gauge = Gauge("model_best_selected", "1 if this model was selected for deployment, else 0", ["model", "country"])
+ols_r2_gauge = Gauge("ols_temperature_r2", "R2 of the Consommation ~ DJU OLS regression", ["country"])
+last_train_timestamp = Gauge("train_last_run_timestamp", "Unix timestamp of the last completed training run", ["country"])
 
 Instrumentator().instrument(app).expose(app, endpoint="/metrics")
 
@@ -95,7 +95,7 @@ def _load_persisted_jobs():
 _load_persisted_jobs()
 
 
-def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str):
+def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str, country: str, test_year: int):
     """Best-effort MLflow logging — never fails the training run if MLflow/DagsHub is unreachable."""
     if not os.getenv("MLFLOW_TRACKING_URI"):
         logger.info("MLFLOW_TRACKING_URI not set — skipping MLflow logging")
@@ -106,12 +106,13 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str)
         mlflow.set_experiment(params.get("mlflow", {}).get("experiment_name", "elec_prediction"))
         with mlflow.start_run():
             mlflow.log_params({
+                "country": country,
                 "sarima_order": params["model_sarima"]["order"],
                 "sarima_seasonal_order": params["model_sarima"]["seasonal_order"],
                 "sarima_log_transform": params["model_sarima"]["log_transform"],
                 "hw_trend": params["model_holt_winters"]["trend"],
                 "hw_seasonal": params["model_holt_winters"]["seasonal"],
-                "test_year": params["data"]["test_year"],
+                "test_year": test_year,
             })
             mlflow.log_metrics({
                 "ols_r2": stats["ols_r2"],
@@ -121,26 +122,28 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str)
                 "sarima_rmse": metrics["sarima"]["rmse"],
             })
             mlflow.set_tag("best_model", best_model)
+            mlflow.set_tag("country", country)
         logger.info("MLflow run logged successfully")
     except Exception as e:
         logger.warning(f"MLflow logging failed (non-fatal): {e}")
 
 
-def _run_training_pipeline(job_id: str):
+def _run_training_pipeline(job_id: str, country: str):
     os.makedirs(JOB_DIR, exist_ok=True)
     job_file = os.path.join(JOB_DIR, f"{job_id}.json")
 
     try:
         params = _load_params()
+        cfg = config.resolve_country_config(params, country)
         seasonal_periods = params["preprocess"]["seasonal_periods"]
-        test_year = params["data"]["test_year"]
+        test_year = cfg["test_year"]
 
         # --- 1. Load + preprocess (OLS temperature correction + deseasonalization) ---
-        df_merged = data_loader.load_merged(params["data"]["raw_conso_path"], params["data"]["raw_dju_path"])
+        df_merged = data_loader.load_merged(cfg["raw_conso_path"], cfg["raw_dju_path"], country=country)
         df, ols_results, stats = preprocess.run_preprocessing(df_merged, seasonal_periods=seasonal_periods)
-        os.makedirs(os.path.dirname(params["data"]["processed_path"]), exist_ok=True)
-        df.to_csv(params["data"]["processed_path"])
-        ols_r2_gauge.set(stats["ols_r2"])
+        os.makedirs(os.path.dirname(cfg["processed_path"]), exist_ok=True)
+        df.to_csv(cfg["processed_path"])
+        ols_r2_gauge.labels(country=country).set(stats["ols_r2"])
 
         # --- 2. Train/test split for backtesting (matches notebook's 2019 holdout) ---
         train_df = df[df.index.year < test_year]
@@ -174,12 +177,12 @@ def _run_training_pipeline(job_id: str):
         # --- 5. Select best model by MAPE ---
         best_model = "sarima" if sarima_metrics["mape"] <= hw_metrics["mape"] else "holt_winters"
 
-        model_mape_gauge.labels(model="holt_winters").set(hw_metrics["mape"])
-        model_rmse_gauge.labels(model="holt_winters").set(hw_metrics["rmse"])
-        model_mape_gauge.labels(model="sarima").set(sarima_metrics["mape"])
-        model_rmse_gauge.labels(model="sarima").set(sarima_metrics["rmse"])
-        model_best_gauge.labels(model="holt_winters").set(1 if best_model == "holt_winters" else 0)
-        model_best_gauge.labels(model="sarima").set(1 if best_model == "sarima" else 0)
+        model_mape_gauge.labels(model="holt_winters", country=country).set(hw_metrics["mape"])
+        model_rmse_gauge.labels(model="holt_winters", country=country).set(hw_metrics["rmse"])
+        model_mape_gauge.labels(model="sarima", country=country).set(sarima_metrics["mape"])
+        model_rmse_gauge.labels(model="sarima", country=country).set(sarima_metrics["rmse"])
+        model_best_gauge.labels(model="holt_winters", country=country).set(1 if best_model == "holt_winters" else 0)
+        model_best_gauge.labels(model="sarima", country=country).set(1 if best_model == "sarima" else 0)
 
         # --- 6. Refit both models on the FULL series for deployment (predict-api serves this) ---
         hw_model_full = trainer_holtwinters.fit_holt_winters(
@@ -192,6 +195,7 @@ def _run_training_pipeline(job_id: str):
         )
 
         metadata = {
+            "country": country,
             "best_model": best_model,
             "sarima_log_transform": sarima_cfg["log_transform"],
             "seasonal_periods": seasonal_periods,
@@ -203,6 +207,7 @@ def _run_training_pipeline(job_id: str):
         }
         history = {
             "job_id": job_id,
+            "country": country,
             "metrics": metrics,
             "best_model": best_model,
             "quality_gate": {
@@ -212,13 +217,14 @@ def _run_training_pipeline(job_id: str):
             },
         }
 
-        artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history)
-        _maybe_log_mlflow(params, stats, metrics, best_model)
-        last_train_timestamp.set(datetime.now(timezone.utc).timestamp())
+        artifacts.save_artifacts(ols_results, hw_model_full, sarima_results_full, metadata, history, country=country)
+        _maybe_log_mlflow(params, stats, metrics, best_model, country, test_year)
+        last_train_timestamp.labels(country=country).set(datetime.now(timezone.utc).timestamp())
 
         result = {
             "status": "success",
             "job_id": job_id,
+            "country": country,
             "best_model": best_model,
             "metrics": metrics,
             "ols_stats": stats,
@@ -228,7 +234,7 @@ def _run_training_pipeline(job_id: str):
         with open(job_file, "w") as f:
             json.dump(_training_jobs[job_id], f, indent=2, default=str)
 
-        logger.info(f"[job={job_id}] Training complete — best_model={best_model} mape={metrics[best_model]['mape']}")
+        logger.info(f"[job={job_id}] Training complete — country={country} best_model={best_model} mape={metrics[best_model]['mape']}")
 
     except Exception as exc:
         logger.exception(f"[job={job_id}] Training failed: {exc}")
@@ -242,11 +248,18 @@ def _run_training_pipeline(job_id: str):
 
 
 class TrainRequest(BaseModel):
-    pass  # all configuration comes from params.yaml — kept as a body for future extension (e.g. override test_year)
+    country: Optional[str] = None  # defaults to params.yaml's default_country if omitted
 
 
 @app.post("/train", status_code=202)
-def train_model(_req: TrainRequest = TrainRequest()):
+def train_model(req: TrainRequest = TrainRequest()):
+    params = _load_params()
+    try:
+        cfg = config.resolve_country_config(params, req.country)
+    except config.UnknownCountryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    country = cfg["code"]
+
     running = [j for j in _training_jobs.values() if j.get("status") == "running"]
     if running:
         raise HTTPException(status_code=409, detail=f"Training job {running[0]['job_id']} already in progress")
@@ -255,14 +268,15 @@ def train_model(_req: TrainRequest = TrainRequest()):
     _training_jobs[job_id] = {
         "status": "running",
         "job_id": job_id,
+        "country": country,
         "started_at": datetime.now(timezone.utc).isoformat(),
     }
 
-    thread = threading.Thread(target=_run_training_pipeline, args=(job_id,), daemon=True)
+    thread = threading.Thread(target=_run_training_pipeline, args=(job_id, country), daemon=True)
     thread.start()
 
-    logger.info(f"Training job {job_id} started")
-    return {"job_id": job_id, "status": "running", "message": f"Training started — poll /train/status/{job_id}"}
+    logger.info(f"Training job {job_id} started for country={country}")
+    return {"job_id": job_id, "status": "running", "country": country, "message": f"Training started — poll /train/status/{job_id}"}
 
 
 @app.get("/train/status/{job_id}")
@@ -280,18 +294,24 @@ def training_status(job_id: str):
 
 
 @app.post("/quality-gate")
-def run_quality_gate():
+def run_quality_gate(country: str = "france"):
     """Runs pytest train-api/tests/test_model_quality.py — 422 if it fails (blocks deployment)."""
     proc = subprocess.run(
         [sys.executable, "-m", "pytest", "tests/test_model_quality.py", "-v", "--tb=short", "--no-header"],
         capture_output=True, text=True, cwd=os.path.dirname(__file__) or ".", timeout=120,
-        env={**os.environ, "ARTIFACTS_PATH": artifacts.ARTIFACTS_PATH},
+        env={**os.environ, "ARTIFACTS_PATH": artifacts.ARTIFACTS_PATH, "TRAIN_COUNTRY": country},
     )
     passed = proc.returncode == 0
-    logger.info(f"Quality gate {'PASSED' if passed else 'FAILED'} (rc={proc.returncode})")
+    logger.info(f"Quality gate {'PASSED' if passed else 'FAILED'} (rc={proc.returncode}) country={country}")
     if not passed:
         raise HTTPException(status_code=422, detail={"status": "failed", "output": proc.stdout[-3000:]})
     return {"status": "passed", "output": proc.stdout[-3000:]}
+
+
+@app.get("/countries")
+def list_countries():
+    params = _load_params()
+    return {"countries": config.list_countries(params), "default_country": params.get("default_country", "france")}
 
 
 @app.get("/health")

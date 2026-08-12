@@ -36,12 +36,13 @@ import yaml
 
 _ARTIFACTS = os.environ.get("ARTIFACTS_PATH", "data/artifacts")
 _PARAMS_PATH = os.environ.get("PARAMS_PATH", "params.yaml")
+_COUNTRY = os.environ.get("TRAIN_COUNTRY", "france")
 
 
 def _load_history() -> dict:
-    path = os.path.join(_ARTIFACTS, "train_history.json")
+    path = os.path.join(_ARTIFACTS, _COUNTRY, "train_history.json")
     if not os.path.exists(path):
-        pytest.skip(f"No train_history.json in {_ARTIFACTS} — run /train first")
+        pytest.skip(f"No train_history.json in {os.path.join(_ARTIFACTS, _COUNTRY)} — run /train first")
     with open(path) as f:
         return json.load(f)
 

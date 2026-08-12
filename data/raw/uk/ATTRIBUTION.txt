@@ -1,0 +1,1 @@
+Contains NESO data, https://www.neso.energy/data-portal/historic-demand-data, licensed under the NESO Open Data Licence

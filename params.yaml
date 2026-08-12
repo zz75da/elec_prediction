@@ -5,11 +5,40 @@
 # and MLflow logs every value automatically (same pattern as rakuten_mlops_services).
 # =============================================================================
 
+default_country: france   # used by /train, /predict, /countries when no country is specified
+
 data:
-  raw_conso_path: data/raw/consommation_mensuelle.csv   # Mois, Consommation (GWh) — RTE open data
-  raw_dju_path: data/raw/dju_mensuel.csv                 # Mois, DJU — 8-region national average
-  processed_path: data/processed/conso_corrigee.csv
-  test_year: 2019            # held-out year for backtesting (matches notebook's a-posteriori analysis)
+  countries:
+    france:
+      label: France
+      raw_conso_path: data/raw/france/consommation_mensuelle.csv   # Mois, Consommation (GWh) — RTE open data
+      raw_dju_path: data/raw/france/dju_mensuel.csv                # Mois, DJU — 8-region national average
+      processed_path: data/processed/france/conso_corrigee.csv
+      test_year: 2019         # held-out year for backtesting (matches notebook's a-posteriori analysis)
+    usa:
+      label: "United States"
+      raw_conso_path: data/raw/usa/consommation_mensuelle.csv      # EIA API v2 (retail-sales, monthly)
+      raw_dju_path: data/raw/usa/dju_mensuel.csv                   # Open-Meteo daily temps -> monthly HDD
+      processed_path: data/processed/usa/conso_corrigee.csv
+      test_year: 2023          # synced range: 2015-01 to 2024-12
+    germany:
+      label: Germany
+      raw_conso_path: data/raw/germany/consommation_mensuelle.csv  # SMARD (Bundesnetzagentur), no auth
+      raw_dju_path: data/raw/germany/dju_mensuel.csv
+      processed_path: data/processed/germany/conso_corrigee.csv
+      test_year: 2023          # synced range: 2019-01 to 2024-12
+    uk:
+      label: "United Kingdom"
+      raw_conso_path: data/raw/uk/consommation_mensuelle.csv       # NESO historic demand data (half-hourly, aggregated), no auth
+      raw_dju_path: data/raw/uk/dju_mensuel.csv
+      processed_path: data/processed/uk/conso_corrigee.csv
+      test_year: 2023          # synced range: 2015-01 to 2024-12
+    finland:
+      label: Finland
+      raw_conso_path: data/raw/finland/consommation_mensuelle.csv  # Fingrid dataset 124 (15-min, aggregated)
+      raw_dju_path: data/raw/finland/dju_mensuel.csv
+      processed_path: data/processed/finland/conso_corrigee.csv
+      test_year: 2023          # synced range: 2015-01 to 2024-12
 
 preprocess:
   # OLS: Consommation ~ const + DJU  (notebook cells 25-38)

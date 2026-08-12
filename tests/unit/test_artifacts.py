@@ -51,9 +51,33 @@ def test_sha256_sidecar_written(tmp_path):
         ols_results={"a": 1}, hw_model={"b": 2}, sarima_results={"c": 3},
         metadata={"best_model": "sarima", "metrics": {}}, history={},
     )
-    assert (tmp_path / "sarima_model.pkl.sha256").exists()
+    assert (tmp_path / "france" / "sarima_model.pkl.sha256").exists()
 
 
 def test_load_metadata_missing_raises(tmp_path):
     with pytest.raises(FileNotFoundError):
         artifacts.load_metadata()
+
+
+def test_save_and_load_roundtrip_multiple_countries(tmp_path):
+    """The core namespace-isolation guarantee: two countries' artifacts never collide."""
+    artifacts.save_artifacts(
+        ols_results={"dummy": "ols-fr"}, hw_model={"dummy": "hw-fr"}, sarima_results={"dummy": "sarima-fr"},
+        metadata={"best_model": "sarima", "metrics": {"sarima": {"mape": 2.22}}},
+        history={"best_model": "sarima", "metrics": {}}, country="france",
+    )
+    artifacts.save_artifacts(
+        ols_results={"dummy": "ols-usa"}, hw_model={"dummy": "hw-usa"}, sarima_results={"dummy": "sarima-usa"},
+        metadata={"best_model": "holt_winters", "metrics": {"holt_winters": {"mape": 5.0}}},
+        history={"best_model": "holt_winters", "metrics": {}}, country="usa",
+    )
+
+    france_meta = artifacts.load_metadata(country="france")
+    usa_meta = artifacts.load_metadata(country="usa")
+    assert france_meta["best_model"] == "sarima"
+    assert usa_meta["best_model"] == "holt_winters"
+
+    france_model, france_type = artifacts.load_deployment_model(country="france")
+    usa_model, usa_type = artifacts.load_deployment_model(country="usa")
+    assert france_type == "sarima" and france_model == {"dummy": "sarima-fr"}
+    assert usa_type == "holt_winters" and usa_model == {"dummy": "hw-usa"}
