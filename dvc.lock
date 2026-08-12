@@ -1,0 +1,162 @@
+schema: '2.0'
+stages:
+  preprocess:
+    cmd: python -c " import yaml, sys; sys.path.insert(0, 'train-api'); from 
+      services import data_loader, preprocess; p = 
+      yaml.safe_load(open('params.yaml')); cfg = 
+      p['data']['countries']['france']; df = 
+      data_loader.load_merged(cfg['raw_conso_path'], cfg['raw_dju_path'], 
+      country='france'); df, ols, stats = preprocess.run_preprocessing(df, 
+      seasonal_periods=p['preprocess']['seasonal_periods']); 
+      df.to_csv(cfg['processed_path']); print(stats) "
+    deps:
+    - path: data/raw/france/consommation_mensuelle.csv
+      hash: md5
+      md5: f8819b9fc01a86fee1e581bd5a1dbd7c
+      size: 2526
+    - path: data/raw/france/dju_mensuel.csv
+      hash: md5
+      md5: 190bc199930355b8124c70f842ebe421
+      size: 2350
+    - path: train-api/services/data_loader.py
+      hash: md5
+      md5: c16ad4414f65a052c4de6ac2ad4fe553
+      size: 1802
+    - path: train-api/services/preprocess.py
+      hash: md5
+      md5: 5edb11885a0722cc6aa017a09d65b3f8
+      size: 3224
+    params:
+      params.yaml:
+        preprocess.seasonal_periods: 12
+    outs:
+    - path: data/processed/france/conso_corrigee.csv
+      hash: md5
+      md5: d90ade07bf5df9ac4a010f99c4b1160b
+      size: 12935
+  train_and_evaluate:
+    cmd: "curl -s -X POST http://localhost:5010/train -H \"Content-Type: application/json\"\
+      \ -d '{\"country\": \"france\"}'\n"
+    deps:
+    - path: data/processed/france/conso_corrigee.csv
+      hash: md5
+      md5: d90ade07bf5df9ac4a010f99c4b1160b
+      size: 12935
+    - path: data/raw/finland/consommation_mensuelle.csv
+      hash: md5
+      md5: 540b2b1b045e67041af04e9f8cde9037
+      size: 2585
+    - path: data/raw/finland/dju_mensuel.csv
+      hash: md5
+      md5: 7b49c4329e05d706a02377c9fd570c8c
+      size: 2290
+    - path: data/raw/germany/consommation_mensuelle.csv
+      hash: md5
+      md5: 97fa88771672c7b213225a331ab2f8d2
+      size: 1699
+    - path: data/raw/germany/dju_mensuel.csv
+      hash: md5
+      md5: b5a53f6f5749a8c998e7245ce91f5719
+      size: 1412
+    - path: data/raw/uk/consommation_mensuelle.csv
+      hash: md5
+      md5: 7f57fba7807f42620b3e2903937c4ef0
+      size: 2717
+    - path: data/raw/uk/dju_mensuel.csv
+      hash: md5
+      md5: 5bb28cc830a9f0e2dd3bf8f20e84ea23
+      size: 2419
+    - path: data/raw/usa/consommation_mensuelle.csv
+      hash: md5
+      md5: b241804266ef32907372c42517e9158d
+      size: 3009
+    - path: data/raw/usa/dju_mensuel.csv
+      hash: md5
+      md5: ce74b9db5c1c4541b2e1c3595f85706c
+      size: 2312
+    - path: train-api/app.py
+      hash: md5
+      md5: 1fe4243e08a871271115d31754694bed
+      size: 16137
+    - path: train-api/services/evaluate.py
+      hash: md5
+      md5: 60ed0dd8fd0cbb1f0807e7c63f311246
+      size: 1183
+    - path: train-api/services/trainer_holtwinters.py
+      hash: md5
+      md5: 1e8127a3930fd932f47f4dff777380f2
+      size: 1169
+    - path: train-api/services/trainer_ml.py
+      hash: md5
+      md5: 1fbc4fcf2afa9309123babd8e2049097
+      size: 5069
+    - path: train-api/services/trainer_sarima.py
+      hash: md5
+      md5: 94ff0f84fbd71f5722f43a5544d6fca5
+      size: 2234
+    params:
+      params.yaml:
+        data.countries.france.test_year: 2019
+        model_holt_winters:
+          trend: add
+          seasonal: add
+        model_ml_global:
+          enabled: true
+          min_countries_required: 2
+          freq: MS
+          lags:
+          - 1
+          - 2
+          - 3
+          - 6
+          - 12
+          date_features:
+          - month
+          static_features:
+          - country
+          lightgbm_params:
+            n_estimators: 200
+            learning_rate: 0.05
+            max_depth: 4
+            num_leaves: 15
+            min_child_samples: 5
+            subsample: 0.8
+            colsample_bytree: 0.8
+            random_state: 42
+            verbosity: -1
+        model_sarima:
+          order:
+          - 0
+          - 1
+          - 1
+          seasonal_order:
+          - 1
+          - 1
+          - 1
+          - 12
+          log_transform: true
+    outs:
+    - path: data/artifacts/france/holt_winters_model.pkl
+      hash: md5
+      md5: 1c2d56781416db15c2330288dfef9f76
+      size: 13157
+    - path: data/artifacts/france/ml_global_model.pkl
+      hash: md5
+      md5: 7c8e73549beed6c452f255ff7f39977f
+      size: 243812
+    - path: data/artifacts/france/model_metadata.json
+      hash: md5
+      md5: 14352aa513f889cf284f665ac155c049
+      size: 711
+    - path: data/artifacts/france/ols_model.pkl
+      hash: md5
+      md5: c74d052597407410ba0f408242db61be
+      size: 16622
+    - path: data/artifacts/france/sarima_model.pkl
+      hash: md5
+      md5: 26da1599efccbf0faff19a53dc0043c7
+      size: 15067430
+    - path: data/artifacts/france/train_history.json
+      hash: md5
+      md5: 33b3ddf16ebed63b556e343fc168c2af
+      size: 439
