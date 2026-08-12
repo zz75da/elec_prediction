@@ -1,0 +1,42 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.venv/
+venv/
+*.ipynb_checkpoints
+
+# --- Data & artifacts (DVC-tracked, not git) ---
+data/processed/*
+!data/processed/.gitkeep
+data/artifacts/*
+!data/artifacts/.gitkeep
+data/jobs/
+*.pkl
+*.keras
+*.h5
+
+# --- DVC ---
+/data/raw/*.csv.dvc.lock
+
+# --- Env / secrets ---
+.env
+*.env.local
+
+# --- Docker / monitoring volumes ---
+grafana-storage/
+prometheus_data/
+
+# --- Test / CI ---
+.pytest_cache/
+tests/logs/*.log
+tests/logs/*.xml
+.coverage
+htmlcov/
+
+# --- OS / editor ---
+.DS_Store
+.vscode/
+.idea/
+*.swp

@@ -1,0 +1,33 @@
+# =============================================================================
+# elec_prediction — Experiment Parameters
+# =============================================================================
+# Edit this file to run a new experiment. train-api reads it at training time
+# and MLflow logs every value automatically (same pattern as rakuten_mlops_services).
+# =============================================================================
+
+data:
+  raw_conso_path: data/raw/consommation_mensuelle.csv   # Mois, Consommation (GWh) — RTE open data
+  raw_dju_path: data/raw/dju_mensuel.csv                 # Mois, DJU — 8-region national average
+  processed_path: data/processed/conso_corrigee.csv
+  test_year: 2019            # held-out year for backtesting (matches notebook's a-posteriori analysis)
+
+preprocess:
+  # OLS: Consommation ~ const + DJU  (notebook cells 25-38)
+  # Conso_correction = Consommation - coef_DJU * DJU
+  seasonal_periods: 12       # months per year — used by seasonal_decompose, Holt-Winters and SARIMA
+
+model_holt_winters:
+  trend: add
+  seasonal: add
+
+model_sarima:
+  order: [0, 1, 1]           # (p, d, q) — selected in notebook after ACF/PACF + Ljung-Box diagnostics
+  seasonal_order: [1, 1, 1, 12]  # (P, D, Q, s)
+  log_transform: true        # fit on log(Conso_correction), exponentiate forecasts back (notebook cell 90-96)
+
+quality_gate:
+  mape_threshold: 10.0       # % — notebook's own acceptability threshold ("MAPE < 10 = très bonne prédiction")
+  rmse_relative_threshold: 0.20  # RMSE / mean(actual) must stay below this fraction
+
+mlflow:
+  experiment_name: elec_prediction

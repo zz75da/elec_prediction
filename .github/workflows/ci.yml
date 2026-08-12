@@ -1,0 +1,108 @@
+name: CI — Tests & DVC Sync
+
+on:
+  push:
+    branches: [main, 'experiment/**']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 1 — Unit & integration tests (pure Python, no Docker needed)
+  # ─────────────────────────────────────────────────────────────────────────
+  tests:
+    name: Unit & Integration Tests
+    runs-on: ubuntu-latest
+
+    permissions:
+      checks: write
+      contents: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install train-api + predict-api + test dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r train-api/requirements.txt
+          pip install -r predict-api/requirements.txt
+          pip install -r tests/requirements-test.txt
+
+      - name: Run unit tests
+        run: |
+          mkdir -p tests/logs
+          pytest tests/unit/ -v --tb=short -q --junitxml=tests/logs/unit-results.xml
+
+      - name: Run integration tests
+        run: |
+          pytest tests/integration/ -v --tb=short -q -m integration --junitxml=tests/logs/integration-results.xml
+
+      - name: Fit models on committed data/raw and run the quality gate
+        run: |
+          python scripts/run_quality_gate_ci.py
+          pytest train-api/tests/test_model_quality.py -v --tb=short
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Pytest Results
+          path: tests/logs/*-results.xml
+          reporter: java-junit
+          fail-on-error: false
+
+      - name: Upload test logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-logs
+          path: tests/logs/
+          if-no-files-found: ignore
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # JOB 2 — DVC remote sync check (models/artifacts only — raw CSVs are
+  # committed directly since the dataset is a few hundred KB)
+  # ─────────────────────────────────────────────────────────────────────────
+  dvc-check:
+    name: DVC Remote Sync Check
+    runs-on: ubuntu-latest
+    needs: tests
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install DVC with S3 support
+        run: pip install "dvc[s3]>=3.50" boto3
+
+      - name: Configure DVC remote credentials
+        env:
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        run: |
+          if [ -n "$DAGSHUB_TOKEN" ]; then
+            dvc remote modify origin --local access_key_id     "$DAGSHUB_TOKEN"
+            dvc remote modify origin --local secret_access_key "$DAGSHUB_TOKEN"
+          else
+            echo "DAGSHUB_TOKEN secret not set — skipping remote sync check"
+          fi
+
+      - name: Check remote sync status
+        if: env.DAGSHUB_TOKEN != ''
+        env:
+          DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+        run: dvc data status --json || true

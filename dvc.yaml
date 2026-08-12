@@ -1,0 +1,51 @@
+# DVC pipeline definition — displayed as a DAG on DagsHub.
+# Mirrors data/raw (already committed, DVC-tracked) through preprocessing to
+# the two candidate models and the backtest evaluation. `dvc repro` runs the
+# whole thing locally (used in CI / dev); train-api's POST /train runs the
+# same steps in-process for the live service (see train-api/app.py).
+
+stages:
+  preprocess:
+    desc: "OLS temperature correction (Consommation ~ DJU) + additive seasonal decomposition"
+    cmd: python -c "
+      import yaml, sys; sys.path.insert(0, 'train-api');
+      from services import data_loader, preprocess;
+      p = yaml.safe_load(open('params.yaml'));
+      df = data_loader.load_merged(p['data']['raw_conso_path'], p['data']['raw_dju_path']);
+      df, ols, stats = preprocess.run_preprocessing(df, seasonal_periods=p['preprocess']['seasonal_periods']);
+      df.to_csv(p['data']['processed_path']);
+      print(stats)
+      "
+    deps:
+      - data/raw/consommation_mensuelle.csv
+      - data/raw/dju_mensuel.csv
+      - train-api/services/data_loader.py
+      - train-api/services/preprocess.py
+    params:
+      - preprocess.seasonal_periods
+    outs:
+      - data/processed/conso_corrigee.csv
+
+  train_and_evaluate:
+    desc: "Fit Holt-Winters + SARIMA(0,1,1)(1,1,1)12, backtest on the held-out test_year, select best model"
+    cmd: >
+      curl -s -X POST http://localhost:5010/train -H "Content-Type: application/json" -d '{}'
+    deps:
+      - data/processed/conso_corrigee.csv
+      - train-api/services/trainer_holtwinters.py
+      - train-api/services/trainer_sarima.py
+      - train-api/services/evaluate.py
+      - train-api/app.py
+    params:
+      - data.test_year
+      - model_holt_winters
+      - model_sarima
+    outs:
+      - data/artifacts/ols_model.pkl
+      - data/artifacts/holt_winters_model.pkl
+      - data/artifacts/sarima_model.pkl
+    metrics:
+      - data/artifacts/model_metadata.json:
+          cache: false
+      - data/artifacts/train_history.json:
+          cache: false

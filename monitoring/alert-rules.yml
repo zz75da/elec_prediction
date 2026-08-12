@@ -1,0 +1,46 @@
+groups:
+  - name: elec_prediction_service_health
+    rules:
+      - alert: TrainAPIDown
+        expr: up{job="train-api"} == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "train-api is down"
+          description: "train-api has been unreachable for 3 minutes."
+
+      - alert: PredictAPIDown
+        expr: up{job="predict-api"} == 0
+        for: 3m
+        labels: { severity: critical }
+        annotations:
+          summary: "predict-api is down"
+          description: "predict-api has been unreachable for 3 minutes."
+
+  - name: elec_prediction_model_quality
+    rules:
+      - alert: SarimaMapeHigh
+        expr: model_mape{model="sarima"} > 10
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "SARIMA backtest MAPE above 10%"
+          description: "SARIMA MAPE={{ $value }}% on the held-out test year — above the notebook's own 10% acceptability threshold."
+
+      - alert: HoltWintersMapeHigh
+        expr: model_mape{model="holt_winters"} > 10
+        for: 1m
+        labels: { severity: warning }
+        annotations:
+          summary: "Holt-Winters backtest MAPE above 10%"
+          description: "Holt-Winters MAPE={{ $value }}% on the held-out test year — above the notebook's own 10% acceptability threshold."
+
+  - name: elec_prediction_traffic
+    rules:
+      - alert: PredictionLatencyHigh
+        expr: histogram_quantile(0.95, rate(predict_request_latency_seconds_bucket[5m])) > 2
+        for: 5m
+        labels: { severity: warning }
+        annotations:
+          summary: "predict-api P95 latency > 2s"
+          description: "Forecast requests are slow — check predict-api resource usage."

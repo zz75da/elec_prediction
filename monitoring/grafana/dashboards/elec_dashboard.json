@@ -1,0 +1,72 @@
+{
+  "title": "elec_prediction — Model & Service Health",
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Backtest MAPE by model (%)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "targets": [
+        { "expr": "model_mape", "legendFormat": "{{model}}" }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Backtest RMSE by model",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "targets": [
+        { "expr": "model_rmse", "legendFormat": "{{model}}" }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "OLS temperature regression R²",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
+      "targets": [
+        { "expr": "ols_temperature_r2" }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "Selected model (1 = deployed)",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
+      "targets": [
+        { "expr": "model_best_selected", "legendFormat": "{{model}}" }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "predict-api P95 latency (s)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, rate(predict_request_latency_seconds_bucket[5m]))" }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Prediction requests (rate)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "targets": [
+        { "expr": "rate(predict_requests_total[5m])" }
+      ]
+    },
+    {
+      "id": 7,
+      "title": "Service up/down",
+      "type": "timeseries",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "targets": [
+        { "expr": "up{job=~\"train-api|predict-api\"}", "legendFormat": "{{job}}" }
+      ]
+    }
+  ]
+}
