@@ -2,16 +2,32 @@
   "title": "elec_prediction — Model & Service Health",
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 2,
   "refresh": "30s",
+  "templating": {
+    "list": [
+      {
+        "name": "country",
+        "label": "Country",
+        "type": "query",
+        "datasource": "Prometheus",
+        "query": "label_values(model_mape, country)",
+        "refresh": 2,
+        "multi": true,
+        "includeAll": true,
+        "current": { "text": "All", "value": "$__all" }
+      }
+    ]
+  },
   "panels": [
     {
       "id": 1,
       "title": "Backtest MAPE by model (%)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percent" }, "overrides": [] },
       "targets": [
-        { "expr": "model_mape", "legendFormat": "{{model}}" }
+        { "expr": "model_mape{country=~\"$country\"}", "legendFormat": "{{model}} — {{country}}" }
       ]
     },
     {
@@ -20,50 +36,101 @@
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
       "targets": [
-        { "expr": "model_rmse", "legendFormat": "{{model}}" }
+        { "expr": "model_rmse{country=~\"$country\"}", "legendFormat": "{{model}} — {{country}}" }
       ]
     },
     {
       "id": 3,
-      "title": "OLS temperature regression R²",
+      "title": "OLS temperature regression R² by country",
       "type": "stat",
       "gridPos": { "h": 6, "w": 6, "x": 0, "y": 8 },
       "targets": [
-        { "expr": "ols_temperature_r2" }
+        { "expr": "ols_temperature_r2{country=~\"$country\"}", "legendFormat": "{{country}}" }
       ]
     },
     {
       "id": 4,
-      "title": "Selected model (1 = deployed)",
-      "type": "stat",
+      "title": "Deployed model per country",
+      "type": "table",
       "gridPos": { "h": 6, "w": 6, "x": 6, "y": 8 },
       "targets": [
-        { "expr": "model_best_selected", "legendFormat": "{{model}}" }
+        { "expr": "model_best_selected{country=~\"$country\"} == 1", "format": "table", "instant": true }
+      ],
+      "transformations": [
+        {
+          "id": "organize",
+          "options": {
+            "excludeByName": { "Time": true, "__name__": true, "Value": true },
+            "renameByName": { "model": "Model", "country": "Country" }
+          }
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "title": "Hours since last training run",
+      "type": "stat",
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 14 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "h",
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 24 },
+              { "color": "red", "value": 168 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        { "expr": "(time() - train_last_run_timestamp{country=~\"$country\"}) / 3600", "legendFormat": "{{country}}" }
       ]
     },
     {
       "id": 5,
       "title": "predict-api P95 latency (s)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
       "targets": [
-        { "expr": "histogram_quantile(0.95, rate(predict_request_latency_seconds_bucket[5m]))" }
+        {
+          "expr": "histogram_quantile(0.95, sum(rate(predict_request_latency_seconds_bucket{country=~\"$country\"}[5m])) by (le, country))",
+          "legendFormat": "{{country}}"
+        }
       ]
     },
     {
       "id": 6,
       "title": "Prediction requests (rate)",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
       "targets": [
-        { "expr": "rate(predict_requests_total[5m])" }
+        { "expr": "rate(predict_requests_total{country=~\"$country\"}[5m])", "legendFormat": "{{country}}" }
       ]
     },
     {
       "id": 7,
       "title": "Service up/down",
       "type": "timeseries",
-      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 22 },
+      "gridPos": { "h": 6, "w": 12, "x": 0, "y": 28 },
+      "fieldConfig": {
+        "defaults": {
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "red", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
       "targets": [
         { "expr": "up{job=~\"train-api|predict-api\"}", "legendFormat": "{{job}}" }
       ]

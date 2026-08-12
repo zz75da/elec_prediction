@@ -19,21 +19,21 @@ groups:
 
   - name: elec_prediction_model_quality
     rules:
-      - alert: SarimaMapeHigh
-        expr: model_mape{model="sarima"} > 10
+      - alert: ModelMapeHigh
+        expr: model_mape > 10
         for: 1m
         labels: { severity: warning }
         annotations:
-          summary: "SARIMA backtest MAPE above 10%"
-          description: "SARIMA MAPE={{ $value }}% on the held-out test year — above the notebook's own 10% acceptability threshold."
+          summary: "{{ $labels.model }} backtest MAPE above 10% ({{ $labels.country }})"
+          description: "{{ $labels.model }} MAPE={{ $value }}% on the held-out test year for country={{ $labels.country }} — above the notebook's own 10% acceptability threshold."
 
-      - alert: HoltWintersMapeHigh
-        expr: model_mape{model="holt_winters"} > 10
-        for: 1m
+      - alert: ModelTrainingStale
+        expr: (time() - train_last_run_timestamp) > 60 * 60 * 24 * 30
+        for: 10m
         labels: { severity: warning }
         annotations:
-          summary: "Holt-Winters backtest MAPE above 10%"
-          description: "Holt-Winters MAPE={{ $value }}% on the held-out test year — above the notebook's own 10% acceptability threshold."
+          summary: "No retraining for {{ $labels.country }} in over 30 days"
+          description: "train_last_run_timestamp for country={{ $labels.country }} is more than 30 days old — model may be stale."
 
   - name: elec_prediction_traffic
     rules:

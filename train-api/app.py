@@ -130,6 +130,14 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str,
 
             mlflow.set_tag("best_model", best_model)
             mlflow.set_tag("country", country)
+
+            for name in metrics.keys():
+                model_path = os.path.join(artifacts.ARTIFACTS_PATH, country, f"{name}_model.pkl")
+                if os.path.exists(model_path):
+                    mlflow.log_artifact(model_path, artifact_path="models")
+            ols_path = os.path.join(artifacts.ARTIFACTS_PATH, country, "ols_model.pkl")
+            if os.path.exists(ols_path):
+                mlflow.log_artifact(ols_path, artifact_path="models")
         logger.info("MLflow run logged successfully")
     except Exception as e:
         logger.warning(f"MLflow logging failed (non-fatal): {e}")
