@@ -3,7 +3,7 @@
 [![CI — Tests & DVC Sync](https://github.com/zz75da/elec_prediction/actions/workflows/ci.yml/badge.svg)](https://github.com/zz75da/elec_prediction/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Author:** [zz75da](https://github.com/zz75da) · z.zeghoud@yahoo.com
+**Author:** [zz75da](https://github.com/zz75da) · [LinkedIn](https://www.linkedin.com/in/zzeghoud) · z.zeghoud@yahoo.com
 
 MLOps platform for forecasting monthly national electricity consumption, corrected for
 temperature effects (heating degree-days) and forecast with Holt-Winters, SARIMA, and a pooled

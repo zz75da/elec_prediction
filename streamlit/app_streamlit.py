@@ -100,6 +100,13 @@ country = st.sidebar.selectbox(
 
 page = st.sidebar.radio("Page", ["Introduction", "Training", "Forecast", "Historical Data", "2019 Comparison"])
 
+st.sidebar.markdown("---")
+st.sidebar.caption(
+    "Built by [zz75da](https://github.com/zz75da) · "
+    "[LinkedIn](https://www.linkedin.com/in/zzeghoud) · "
+    "[GitHub](https://github.com/zz75da/elec_prediction)"
+)
+
 # ---------------------------------------------------------------------------
 if page == "Introduction":
     st.write(
