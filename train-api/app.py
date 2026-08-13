@@ -95,7 +95,7 @@ def _load_persisted_jobs():
 _load_persisted_jobs()
 
 
-def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str, country: str, test_year: int, ml_ran: bool):
+def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str, country: str, test_year: int, ml_ran: bool, models: dict):
     """Best-effort MLflow logging — never fails the training run if MLflow/DagsHub is unreachable."""
     if not os.getenv("MLFLOW_TRACKING_URI"):
         logger.info("MLFLOW_TRACKING_URI not set — skipping MLflow logging")
@@ -131,13 +131,25 @@ def _maybe_log_mlflow(params: dict, stats: dict, metrics: dict, best_model: str,
             mlflow.set_tag("best_model", best_model)
             mlflow.set_tag("country", country)
 
-            for name in metrics.keys():
-                model_path = os.path.join(artifacts.ARTIFACTS_PATH, country, f"{name}_model.pkl")
-                if os.path.exists(model_path):
-                    mlflow.log_artifact(model_path, artifact_path="models")
-            ols_path = os.path.join(artifacts.ARTIFACTS_PATH, country, "ols_model.pkl")
-            if os.path.exists(ols_path):
-                mlflow.log_artifact(ols_path, artifact_path="models")
+            # holt_winters/sarima/ols are real statsmodels results objects — log them as proper
+            # MLflow Models (MLmodel manifest + registry entry), not just raw pickle blobs, so
+            # they show up under DagsHub's Models tab / a run's Model card.
+            import mlflow.statsmodels
+
+            statsmodels_models = {"ols": models.get("ols"), **{k: v for k, v in models.items() if k in ("holt_winters", "sarima")}}
+            for name, model in statsmodels_models.items():
+                if model is None:
+                    continue
+                mlflow.statsmodels.log_model(
+                    model, artifact_path=f"models/{name}",
+                    registered_model_name=f"{country}_{name}",
+                )
+
+            # ml_global wraps Nixtla's MLForecast, which has no native MLflow flavor — log the
+            # already-saved pickle as a raw artifact instead of a registered Model.
+            ml_global_path = os.path.join(artifacts.ARTIFACTS_PATH, country, "ml_global_model.pkl")
+            if os.path.exists(ml_global_path):
+                mlflow.log_artifact(ml_global_path, artifact_path="models")
         logger.info("MLflow run logged successfully")
     except Exception as e:
         logger.warning(f"MLflow logging failed (non-fatal): {e}")
@@ -255,12 +267,13 @@ def _run_training_pipeline(job_id: str, country: str):
             },
         }
 
+        trained_models = {"ols": ols_results, "holt_winters": hw_model_full, "sarima": sarima_results_full, "ml_global": ml_fcst_full}
         artifacts.save_artifacts(
             ols_results,
             {"holt_winters": hw_model_full, "sarima": sarima_results_full, "ml_global": ml_fcst_full},
             metadata, history, country=country,
         )
-        _maybe_log_mlflow(params, stats, metrics, best_model, country, test_year, ml_ran)
+        _maybe_log_mlflow(params, stats, metrics, best_model, country, test_year, ml_ran, trained_models)
         last_train_timestamp.labels(country=country).set(datetime.now(timezone.utc).timestamp())
 
         result = {

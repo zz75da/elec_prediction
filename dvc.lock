@@ -76,8 +76,8 @@ stages:
       size: 2312
     - path: train-api/app.py
       hash: md5
-      md5: 6c178b26add666cc2f2cdc74d711cb41
-      size: 16598
+      md5: 0dc65094cc3b092860f36b9684e0ff24
+      size: 17456
     - path: train-api/services/evaluate.py
       hash: md5
       md5: 60ed0dd8fd0cbb1f0807e7c63f311246
@@ -146,7 +146,7 @@ stages:
       size: 243812
     - path: data/artifacts/france/model_metadata.json
       hash: md5
-      md5: ca3794ac31820d8d90d011f0ad48511f
+      md5: 6c83a239deb6b2dd786bc7aadbb90609
       size: 711
     - path: data/artifacts/france/ols_model.pkl
       hash: md5
@@ -158,5 +158,5 @@ stages:
       size: 15067629
     - path: data/artifacts/france/train_history.json
       hash: md5
-      md5: 3da0b967fa3a988e20f3cf24538bdf37
+      md5: f19f62e6358aa4b6adf17c8928da2f8a
       size: 439
