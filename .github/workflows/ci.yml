@@ -97,10 +97,13 @@ jobs:
       - name: Configure DVC remote credentials
         env:
           DAGSHUB_TOKEN: ${{ secrets.DAGSHUB_TOKEN }}
+          DAGSHUB_USER: ${{ secrets.DAGSHUB_USER }}
         run: |
           if [ -n "$DAGSHUB_TOKEN" ]; then
-            dvc remote modify origin --local access_key_id     "$DAGSHUB_TOKEN"
-            dvc remote modify origin --local secret_access_key "$DAGSHUB_TOKEN"
+            dvc remote modify origin --local user "${DAGSHUB_USER:-zz75da}"
+            dvc remote modify origin --local password "$DAGSHUB_TOKEN"
+            dvc remote modify s3 --local access_key_id     "$DAGSHUB_TOKEN"
+            dvc remote modify s3 --local secret_access_key "$DAGSHUB_TOKEN"
           else
             echo "DAGSHUB_TOKEN secret not set — skipping remote sync check"
           fi
