@@ -126,7 +126,7 @@ stages:
             verbosity: -1
         model_sarima:
           order:
-          - 0
+          - 1
           - 1
           - 1
           seasonal_order:
@@ -146,7 +146,7 @@ stages:
       size: 243812
     - path: data/artifacts/france/model_metadata.json
       hash: md5
-      md5: 14352aa513f889cf284f665ac155c049
+      md5: ca3794ac31820d8d90d011f0ad48511f
       size: 711
     - path: data/artifacts/france/ols_model.pkl
       hash: md5
@@ -154,9 +154,9 @@ stages:
       size: 16622
     - path: data/artifacts/france/sarima_model.pkl
       hash: md5
-      md5: 26da1599efccbf0faff19a53dc0043c7
-      size: 15067430
+      md5: f70eed923d07d28591567fe2d109002f
+      size: 15067629
     - path: data/artifacts/france/train_history.json
       hash: md5
-      md5: 33b3ddf16ebed63b556e343fc168c2af
+      md5: 3da0b967fa3a988e20f3cf24538bdf37
       size: 439

@@ -14,7 +14,7 @@ Streamlit UI), each trained and served independently. Small, containerized FastA
 
 **Best model (France):** the pooled global LightGBM model (`ml_global`) on the
 temperature-corrected series — **MAPE = 1.93%** on the 2019 out-of-sample backtest
-(SARIMA: 2.20%, Holt-Winters: 2.65% — quality-gate threshold: < 10%).
+(SARIMA: 1.97%, Holt-Winters: 2.65% — quality-gate threshold: < 10%).
 
 ---
 
