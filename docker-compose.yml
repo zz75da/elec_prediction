@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   elec_prediction_network:
     driver: bridge

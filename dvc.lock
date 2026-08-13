@@ -76,8 +76,8 @@ stages:
       size: 2312
     - path: train-api/app.py
       hash: md5
-      md5: 1fe4243e08a871271115d31754694bed
-      size: 16137
+      md5: 6c178b26add666cc2f2cdc74d711cb41
+      size: 16598
     - path: train-api/services/evaluate.py
       hash: md5
       md5: 60ed0dd8fd0cbb1f0807e7c63f311246

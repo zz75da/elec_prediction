@@ -39,7 +39,7 @@ def synthetic_monthly_series() -> pd.DataFrame:
     """Deterministic synthetic monthly series: consumption driven by DJU + noise, no real data needed."""
     rng = np.random.default_rng(42)
     n_years = 6
-    months = pd.date_range("2013-01-31", periods=n_years * 12, freq="M")
+    months = pd.date_range("2013-01-31", periods=n_years * 12, freq="ME")
     month_of_year = months.month
     # DJU: high in winter, ~0 in summer
     dju = np.clip(300 * np.cos((month_of_year - 1) / 12 * 2 * np.pi) + 250 + rng.normal(0, 20, len(months)), 0, None)

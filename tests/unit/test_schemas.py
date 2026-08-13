@@ -7,7 +7,7 @@ from services import schemas
 
 
 def _valid_df(n=30):
-    months = pd.date_range("2015-01-31", periods=n, freq="M")
+    months = pd.date_range("2015-01-31", periods=n, freq="ME")
     return pd.DataFrame({"Consommation": [40000.0] * n, "DJU": [200.0] * n}, index=months)
 
 

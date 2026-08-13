@@ -143,7 +143,7 @@ def predict(req: PredictRequest):
         raise HTTPException(status_code=500, detail=f"Unknown model_type '{model_type}' for country='{country}'")
 
     last_month = pd.Timestamp(metadata["last_observed_month"])
-    future_months = pd.date_range(last_month, periods=req.horizon + 1, freq="M")[1:]
+    future_months = pd.date_range(last_month, periods=req.horizon + 1, freq="ME")[1:]
 
     consommation_pred = None
     if req.dju_forecast is not None:

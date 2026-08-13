@@ -12,8 +12,9 @@ multi-country LightGBM model. Started as a France-only forecasting project and n
 Streamlit UI), each trained and served independently. Small, containerized FastAPI + DVC + MLflow
 + Prometheus/Grafana stack — the whole repo (code + data + models) is a few MB.
 
-**Best model (France):** SARIMA(0,1,1)(1,1,1)₁₂ on the temperature-corrected, log-transformed
-series — **MAPE = 2.22%** on the 2019 out-of-sample backtest (quality-gate threshold: < 10%).
+**Best model (France):** the pooled global LightGBM model (`ml_global`) on the
+temperature-corrected series — **MAPE = 1.93%** on the 2019 out-of-sample backtest
+(SARIMA: 2.20%, Holt-Winters: 2.65% — quality-gate threshold: < 10%).
 
 ---
 
@@ -210,7 +211,7 @@ before for callers that don't pass one.
 Grafana dashboard (`monitoring/grafana/dashboards/elec_dashboard.json`, auto-provisioned) shows:
 MAPE/RMSE per model, which model is currently deployed, OLS R², predict-api P95 latency and
 request rate, and service up/down. Alert rules (`monitoring/alert-rules.yml`): service down ≥ 3
-min, backtest MAPE > 10% for either model, P95 latency > 2s.
+min, backtest MAPE > 10% for any candidate model, training stale > 30 days, P95 latency > 2s.
 
 ---
 
