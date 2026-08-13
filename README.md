@@ -7,13 +7,10 @@
 
 MLOps platform for forecasting monthly national electricity consumption, corrected for
 temperature effects (heating degree-days) and forecast with Holt-Winters, SARIMA, and a pooled
-multi-country LightGBM model. Started as a France-only rebuild of `P9_01_notebook.ipynb`
-(OpenClassrooms P9) and now supports **7 countries** (France, USA, Germany, Austria, Luxembourg,
-UK, Finland — selectable from the Streamlit UI), each trained and served independently. Small,
-containerized FastAPI + DVC + MLflow + Prometheus/Grafana stack, reusing the architectural patterns
-of [`rakuten_mlops_services`](https://github.com/zz75da/rakuten_z) scaled down to lightweight
-statistical/ML time-series models instead of a 4-encoder multimodal classifier — the whole repo
-(code + data + models) is a few MB, well under the 20 GB target.
+multi-country LightGBM model. Started as a France-only forecasting project and now supports
+**7 countries** (France, USA, Germany, Austria, Luxembourg, UK, Finland — selectable from the
+Streamlit UI), each trained and served independently. Small, containerized FastAPI + DVC + MLflow
++ Prometheus/Grafana stack — the whole repo (code + data + models) is a few MB.
 
 **Best model (France):** SARIMA(0,1,1)(1,1,1)₁₂ on the temperature-corrected, log-transformed
 series — **MAPE = 2.22%** on the 2019 out-of-sample backtest (quality-gate threshold: < 10%).
@@ -53,13 +50,13 @@ explicit note on how that cost is handled — not just a list of technologies.
 | **Streamlit for the UI** | A working multi-page interface (training trigger, forecasting, historical browsing, cross-country analytics) with no separate frontend build step. | Streamlit re-runs the whole script on every interaction, which would mean re-fetching or recomputing on every click. Handled with `@st.cache_data(ttl=...)` on the country list and the 2019 comparison analysis, so repeat interactions don't re-hit the APIs or reprocess CSVs each time. |
 | **Statistical models + one pooled global LightGBM, not deep learning** | With ~70-130 monthly rows per country, classical models and a shallow pooled gradient-boosted model are the evidence-backed choice for this data shape (M5-competition findings, the Global Forecasting Models literature) — deep learning needs far more series/data to avoid overfitting here. | Not state-of-the-art next to 2024-2025 foundation time-series models. Handled by researching and documenting that trade-off explicitly rather than ignoring it (see [Model Overview](#model-overview)) — N-BEATS/N-HiTS and Chronos/TimeGPT were evaluated and consciously deferred, not overlooked. |
 | **Data connectors kept out of the running containers** | `train-api`/`predict-api` never need third-party API credentials or outbound network access — only local files (see [Multi-Country Data](#multi-country-data)). | Syncing a country's data becomes a separate, manual-or-scheduled step rather than automatic. Handled with one documented entry point (`scripts/sync_country_data.py`) that can be put on a schedule (cron/GitHub Actions) if automated refresh is wanted later. |
-| **`predict-api` duplicates `train-api`'s model-loading code** rather than sharing a library | Genuine service independence — `predict-api` can be deployed, restarted, or scaled without depending on `train-api`'s codebase at all. | A change to the artifact format has to be applied in two places. Accepted as a deliberate trade-off favoring independence over DRY, matching the same pattern used in `rakuten_mlops_services`. |
+| **`predict-api` duplicates `train-api`'s model-loading code** rather than sharing a library | Genuine service independence — `predict-api` can be deployed, restarted, or scaled without depending on `train-api`'s codebase at all. | A change to the artifact format has to be applied in two places. Accepted as a deliberate trade-off favoring independence over DRY. |
 
 ---
 
 ## Model Overview
 
-Two-stage pipeline, faithfully ported from the notebook:
+Two-stage pipeline:
 
 1. **Temperature correction** — OLS regression `Consommation ~ const + DJU` (R²≈0.94). The
    DJU-driven component is subtracted: `Conso_correction = Consommation − coef_DJU × DJU`.
@@ -67,8 +64,7 @@ Two-stage pipeline, faithfully ported from the notebook:
    held-out year, best one selected automatically by MAPE:
    - **Holt-Winters** — triple exponential smoothing, `trend='add'`, `seasonal='add'`, period 12.
    - **SARIMA(0,1,1)(1,1,1)₁₂** — fit on `log(Conso_correction)`, forecast exponentiated back.
-     Selected via ACF/PACF identification + Ljung-Box whiteness test + Shapiro normality test
-     (see `notebooks/P9_01_notebook.ipynb` for the full diagnostic walkthrough).
+     Selected via ACF/PACF identification + Ljung-Box whiteness test + Shapiro normality test.
    - **`ml_global`** — a single LightGBM model (via Nixtla's `mlforecast`) trained on **all 7
      countries' series pooled together**, not one ML model per country. With only ~70-130 monthly
      rows per country, a per-country ML model would overfit badly; pooling is the well-evidenced
@@ -127,7 +123,7 @@ this repo's lightweight-Docker-image ethos for an unclear accuracy win at this s
 | **streamlit** | 8501 | UI: trigger training, view forecasts, browse historical data |
 | **prometheus** | 9090 | Metrics scraping (15s interval) |
 | **grafana** | 3000 | Dashboards: MAPE/RMSE by model, service health, latency |
-| **MLflow** | — | DagsHub-hosted experiment tracking (same pattern as rakuten_mlops_services) |
+| **MLflow** | — | DagsHub-hosted experiment tracking |
 
 No JWT gateway, Airflow, or Kubernetes here — the training workload is small enough (seconds per
 run) that a `/train` call or a cron job covers it without that infrastructure.
@@ -296,13 +292,12 @@ rather than USA demand being genuinely temperature-insensitive.
 | `data/raw/<country>/consommation_mensuelle.csv` | Per-country source, see [Multi-Country Data](#multi-country-data) — France committed directly (132 rows, a few KB); others via `scripts/sync_country_data.py` |
 | `data/raw/<country>/dju_mensuel.csv` | France: Degrés Jours Unifiés, averaged across 8 regions. Others: Open-Meteo-derived heating-degree-days |
 | `data/processed/<country>/`, `data/artifacts/<country>/` | DVC-tracked pipeline outputs (preprocessed series, fitted models, metrics), namespaced per country |
-| MLflow | DagsHub-hosted, same pattern as rakuten_mlops_services — set `MLFLOW_TRACKING_URI` in `.env`, runs tagged with `country` |
+| MLflow | DagsHub-hosted — set `MLFLOW_TRACKING_URI` in `.env`, runs tagged with `country` |
 
-Raw data is committed directly (it's tiny); DVC tracks the *pipeline outputs* — this is the
-opposite split from rakuten_mlops_services, where the 85k-row multimodal dataset had to be
-DVC-tracked from the start. See `dvc.yaml` for the two-stage pipeline (`preprocess`,
-`train_and_evaluate`, scoped to France) and `scripts/extract_raw_data.py` to regenerate France's
-raw CSVs from the original source files if you have them.
+Raw data is committed directly (it's tiny); DVC tracks the *pipeline outputs* instead. See
+`dvc.yaml` for the two-stage pipeline (`preprocess`, `train_and_evaluate`, scoped to France) and
+`scripts/extract_raw_data.py` to regenerate France's raw CSVs from the original source files if
+you have them.
 
 ---
 
@@ -377,7 +372,6 @@ elec_prediction/
 │   ├── extract_raw_data.py         # regenerate data/raw/france from the original xlsx/csv source files
 │   ├── sync_country_data.py        # fetch + validate + write data/raw/<country>/ via connectors/
 │   └── run_quality_gate_ci.py      # fit + quality gate without booting the FastAPI server (used in CI)
-├── notebooks/P9_01_notebook.ipynb  # original EDA/modeling notebook, kept for reference
 ├── tests/                          # data_quality + unit + integration suites
 ├── .github/workflows/ci.yml        # data quality + tests + DVC remote sync check
 ├── dvc.yaml · params.yaml          # pipeline definition + tunable parameters (data.countries map)
