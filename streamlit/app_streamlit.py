@@ -62,6 +62,24 @@ COUNTRY_FLAGS = {
     "austria": "🇦🇹", "luxembourg": "🇱🇺",
 }
 
+# Fixed hue per country (never remapped), shared by the Introduction map and the 2019
+# Comparison page — same order as connectors/registry.py. A country added later without a
+# slot here falls back to neutral gray rather than crash.
+COUNTRY_COLORS = {
+    "france": "#2a78d6",     # blue
+    "usa": "#eb6834",        # orange
+    "germany": "#1baf7a",    # aqua
+    "uk": "#eda100",         # yellow
+    "finland": "#e87ba4",    # magenta
+    "austria": "#008300",    # green
+    "luxembourg": "#4a3aa7",  # violet
+}
+FALLBACK_COLOR = "#898781"
+COUNTRY_ISO3 = {
+    "france": "FRA", "usa": "USA", "germany": "DEU", "uk": "GBR",
+    "finland": "FIN", "austria": "AUT", "luxembourg": "LUX",
+}
+
 try:
     _countries_payload = _fetch_countries()
     _country_options = {c["code"]: c["label"] for c in _countries_payload["countries"]}
@@ -80,10 +98,82 @@ country = st.sidebar.selectbox(
     key="country",
 )
 
-page = st.sidebar.radio("Page", ["Training", "Forecast", "Historical Data", "2019 Comparison"])
+page = st.sidebar.radio("Page", ["Introduction", "Training", "Forecast", "Historical Data", "2019 Comparison"])
 
 # ---------------------------------------------------------------------------
-if page == "Training":
+if page == "Introduction":
+    st.write(
+        "An MLOps platform that forecasts monthly national electricity demand — corrected for "
+        "temperature effects, backtested across three candidate models, and served independently "
+        "for each of 7 countries."
+    )
+
+    fig_map = go.Figure()
+    for code, iso3 in COUNTRY_ISO3.items():
+        color = COUNTRY_COLORS.get(code, FALLBACK_COLOR)
+        fig_map.add_trace(go.Choropleth(
+            locations=[iso3], z=[1], locationmode="ISO-3",
+            colorscale=[[0, color], [1, color]], showscale=False, zmin=0, zmax=1,
+            marker_line_color="white", marker_line_width=0.6,
+            name=_country_options.get(code, code),
+            hovertemplate=f"{COUNTRY_FLAGS.get(code, '')} {_country_options.get(code, code)}<extra></extra>",
+        ))
+    # Equirectangular (flat lon/lat grid, no curvature) — deterministic and centered by
+    # construction, unlike "natural earth" + fitbounds, whose auto-fit/auto-center over two
+    # far-apart clusters (North America and Europe) was landing off-center.
+    fig_map.update_geos(
+        showframe=False, showcoastlines=False, projection_type="equirectangular",
+        landcolor="#eeeeea", showland=True, showocean=True, oceancolor="#ffffff",
+        showcountries=True, countrycolor="#d8d6cf", bgcolor="rgba(0,0,0,0)",
+        resolution=110,
+        lonaxis_range=[-128, 32], lataxis_range=[22, 72],
+        center=dict(lon=-48, lat=47),
+    )
+    fig_map.update_layout(
+        margin=dict(l=0, r=0, t=0, b=0), height=340, showlegend=False,
+        autosize=True,
+    )
+    st.plotly_chart(fig_map, use_container_width=True, config={"responsive": True})
+    st.caption("The 7 countries currently configured — select one from the sidebar to train, forecast, or browse its history.")
+
+    st.subheader("At a Glance")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Countries", "7")
+    m2.metric("Candidate models", "3", help="Holt-Winters, SARIMA, and a pooled multi-country LightGBM model")
+    m3.metric("Quality gate", "MAPE < 10%", help="Backtest threshold on each country's held-out test year")
+    m4.metric("Best result so far", "1.3%", help="Germany — SARIMA — held-out backtest MAPE")
+
+    st.subheader("How It Works")
+    st.markdown(
+        """
+1. **Temperature correction** — an OLS regression (`Consommation ~ const + DJU`) removes the
+   heating-degree-day-driven component, isolating the underlying demand trend.
+2. **Three candidates, backtested** — Holt-Winters and SARIMA are fit per country; a pooled
+   LightGBM model (via Nixtla's `mlforecast`) is fit once across all countries with enough data,
+   borrowing statistical strength across series rather than overfitting ~100 rows per country.
+3. **Best model wins, automatically** — whichever candidate has the lowest backtest MAPE on that
+   country's held-out year is selected and deployed — no manual model choice required.
+4. **Served independently** — `predict-api` loads each country's selected model and serves
+   forecasts through a separate FastAPI service from the one that trains them.
+        """
+    )
+
+    st.subheader("Where to Go From Here")
+    p1, p2, p3, p4 = st.columns(4)
+    p1.markdown("**🏋️ Training**\n\nTrigger a training run for the selected country and watch the backtest MAPE for each candidate.")
+    p2.markdown("**🔮 Forecast**\n\nGenerate a forecast beyond the last observed month, with confidence intervals where available.")
+    p3.markdown("**📊 Historical Data**\n\nBrowse the raw consumption and temperature series for the selected country.")
+    p4.markdown("**🌍 2019 Comparison**\n\nCompare all 7 countries side by side on their one shared complete calendar year.")
+
+    st.subheader("Under the Hood")
+    st.caption(
+        "FastAPI (train-api + predict-api) · DVC-tracked pipeline · MLflow experiment tracking "
+        "(DagsHub-hosted) · Prometheus + Grafana monitoring · Docker Compose. "
+        "See the [GitHub repository](https://github.com/zz75da/elec_prediction) for the full "
+        "architecture, data sources, and methodology."
+    )
+
+elif page == "Training":
     st.header(f"Model Training — {_country_options.get(country, country)}")
     st.write("Runs the pipeline: OLS regression (Consommation ~ DJU) → deseasonalization → "
              "Holt-Winters + SARIMA → backtest on the test year → best-model selection.")
@@ -218,19 +308,7 @@ else:  # page == "2019 Comparison"
         "for a direct country-to-country comparison."
     )
 
-    # Fixed hue per country (never remapped) — same order as connectors/registry.py.
-    # A country added later without a slot here falls back to neutral gray rather than crash.
-    COUNTRY_COLORS = {
-        "france": "#2a78d6",     # blue
-        "usa": "#eb6834",        # orange
-        "germany": "#1baf7a",    # aqua
-        "uk": "#eda100",         # yellow
-        "finland": "#e87ba4",    # magenta
-        "austria": "#008300",    # green
-        "luxembourg": "#4a3aa7",  # violet
-    }
     GRID_COLOR = "#e1e0d9"
-    FALLBACK_COLOR = "#898781"
 
     # World Bank 2019 estimates (the only external figures on this page — everything else
     # is computed from data/raw/*). Population in millions; GDP in billion current USD.
