@@ -183,7 +183,7 @@ elif page == "Historical Data":
 
         attribution_path = f"data/raw/{country}/ATTRIBUTION.txt"
         if os.path.exists(attribution_path):
-            with open(attribution_path) as f:
+            with open(attribution_path, encoding="utf-8") as f:
                 st.caption(f.read().strip())
 
         # Bounds come from this country's own data — France stops at 2019, the others
@@ -535,4 +535,59 @@ else:  # page == "2019 Comparison"
             "DJU Slope 95% CI / p-value: inference on the heating-degree-day regression slope "
             "(n=12 per country — see Methodology note above). A p-value above 0.05 means the "
             "slope isn't statistically distinguishable from zero at that country's data volume."
+        )
+
+        # --- Written synthesis of the charts/tables above ---
+        st.subheader("Analysis")
+        st.markdown(
+            """
+**Three lenses, three different rankings — by design, not by error.** Raw totals mostly track
+economy size: the USA (3.81M GWh) and Germany (497k GWh) top the list because they're the largest
+economies here, not because they're less efficient. Per-capita consumption tells a lifestyle and
+electrification story instead — Finland leads by a wide margin (15.6 MWh/capita, 4.1× the UK),
+matching the well-documented pattern of cold-climate, electric-heating-heavy Nordic economies
+topping global per-capita electricity tables. Energy intensity (electricity per unit of GDP)
+answers a third, genuinely different question — economic efficiency, not lifestyle — which is why
+international energy statistics (IEA, EIA, Eurostat) always report per-capita and intensity as
+separate indicators rather than one substituting for the other: they can, and do, disagree.
+Luxembourg is the clearest case in this dataset — 8.4 MWh/capita (above France and Austria) but by
+far the *lowest* energy intensity (72.6 MWh/M$ GDP) of any country here, because its GDP is large
+enough relative to its physical electricity use to make an above-average consumer look like a
+highly efficient economy. Reading only one of these three numbers would give a materially
+different, and in Luxembourg's case contradictory, conclusion.
+
+**Seasonality has exactly one real outlier, and the correlation matrix shows it's structural, not
+noise.** Every country here peaks in January except the United States, which peaks in July. The
+seasonal-profile correlation matrix confirms what the monthly-share chart suggests: Austria,
+France, Germany, Luxembourg and the UK correlate at 0.91–0.96 with each other — a genuinely tight
+cluster, consistent with a shared winter-heating-driven demand pattern across comparable-latitude,
+heating-dominated Western European grids. Finland correlates only moderately with that cluster
+(0.56–0.64) — still winter-peaking, but with a visibly sharper profile, plausibly reflecting more
+extreme cold variance and a higher share of electric (rather than gas) heating. The USA is the
+genuine outlier: its profile *anti-correlates* with Austria and Finland (−0.25 and −0.17) — not
+just "different," but running in the opposite direction, which is exactly what a cooling-dominated
+summer peak looks like set against a heating-dominated winter peak.
+
+**The temperature-sensitivity regression is where this stops being descriptive and becomes a real
+model-specification finding.** A heating-degree-days-only OLS (`Consommation ~ const + DJU`)
+explains 88–92% of monthly variation for France, the UK and Austria, a respectable 53–68% for
+Finland, Luxembourg and Germany, and effectively nothing for the USA (R² = 0.17, p = 0.19 — not
+statistically distinguishable from zero at conventional significance levels). That's not a weaker
+version of the same relationship — it's the empirical signature of the U-shaped
+temperature-demand curve documented in the energy-economics literature (Deschênes & Greenstone):
+demand rises with cold *and* with heat once meaningful air-conditioning load exists, so a model
+with a heating term and no cooling term is structurally missing half of the USA's real
+relationship, while the same specification is genuinely adequate for the heating-dominated
+European grids in this comparison. The R² here isn't really ranking countries by "temperature
+sensitivity" so much as by how well a heating-only model fits each country's actual demand
+structure — a distinction the methodology note above raises but the number alone doesn't convey.
+
+**Taken together:** scale, lifestyle and efficiency are three separate axes that happen to agree
+for some countries and sharply disagree for others (Luxembourg: high per-capita consumption, low
+intensity). Seasonal shape splits along heating-vs-cooling load rather than geography alone — a
+cold Nordic country and a temperate Western European one can share a winter peak while still
+having a distinguishably different profile — and a summer-peaking outlier will always fit both the
+correlation matrix and the temperature-sensitivity regression poorly, for the same underlying
+reason.
+"""
         )

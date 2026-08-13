@@ -146,7 +146,7 @@ stages:
       size: 243812
     - path: data/artifacts/france/model_metadata.json
       hash: md5
-      md5: 6c83a239deb6b2dd786bc7aadbb90609
+      md5: e9307ade644c97848746d3dddd0d9ecb
       size: 711
     - path: data/artifacts/france/ols_model.pkl
       hash: md5
@@ -158,5 +158,5 @@ stages:
       size: 15067629
     - path: data/artifacts/france/train_history.json
       hash: md5
-      md5: f19f62e6358aa4b6adf17c8928da2f8a
+      md5: 00e32f7440eb3df06f6da387881d61ea
       size: 439

@@ -1,1 +1,1 @@
-Contains data from SMARD.de (Bundesnetzagentur), licensed under the Datenlizenz Deutschland – Namensnennung 2.0 (dl-de/by-2.0)
+Contains data from SMARD.de (Bundesnetzagentur), licensed under the Datenlizenz Deutschland â€“ Namensnennung 2.0 (dl-de/by-2.0)

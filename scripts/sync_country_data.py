@@ -66,7 +66,9 @@ def sync_one(country: str, start: str, end: str) -> None:
     merged.reset_index().to_csv(out_dir / "consommation_dju_mensuel.csv", index=False)
 
     if spec.attribution:
-        (out_dir / "ATTRIBUTION.txt").write_text(spec.attribution.format(year=datetime.now().year) + "\n")
+        (out_dir / "ATTRIBUTION.txt").write_text(
+            spec.attribution.format(year=datetime.now().year) + "\n", encoding="utf-8"
+        )
 
     print(f"[{country}] Wrote {out_dir}/consommation_mensuelle.csv, dju_mensuel.csv, consommation_dju_mensuel.csv")
 
